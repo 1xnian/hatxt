@@ -4,6 +4,8 @@ import io.homeassistant.companion.android.common.data.LocalStorage
 import io.homeassistant.companion.android.common.data.authentication.AuthenticationRepository
 import io.homeassistant.companion.android.common.data.authentication.AuthenticationRepositoryFactory
 import io.homeassistant.companion.android.common.data.authentication.SessionState
+import io.homeassistant.companion.android.common.data.endpoint.EndpointRepository
+import io.homeassistant.companion.android.common.data.endpoint.EndpointRepositoryFactory
 import io.homeassistant.companion.android.common.data.integration.IntegrationRepository
 import io.homeassistant.companion.android.common.data.integration.IntegrationRepositoryFactory
 import io.homeassistant.companion.android.common.data.prefs.PrefsRepository
@@ -71,6 +73,7 @@ internal class ServerManagerImpl @Inject constructor(
     private val integrationRepositoryFactory: IntegrationRepositoryFactory,
     private val webSocketRepositoryFactory: WebSocketRepositoryFactory,
     private val serverConnectionStateProviderFactory: ServerConnectionStateProviderFactory,
+    private val endpointRepositoryFactory: EndpointRepositoryFactory,
     private val prefsRepository: PrefsRepository,
     private val serverDao: ServerDao,
     private val sensorRepository: SensorRepository,
@@ -83,6 +86,7 @@ internal class ServerManagerImpl @Inject constructor(
     private val webSocketRepos = ServerMap(webSocketRepositoryFactory::create)
     private val connectionStateProviders =
         ServerMap<ServerConnectionStateProvider>(serverConnectionStateProviderFactory::create)
+    private val endpointRepos = ServerMap<EndpointRepository>(endpointRepositoryFactory::create)
 
     override suspend fun servers(): List<Server> {
         return serverDao.getAll()
@@ -139,6 +143,8 @@ internal class ServerManagerImpl @Inject constructor(
         webSocketRepos[id]?.shutdown()
         webSocketRepos.remove(id)
         connectionStateProviders.remove(id)
+        endpointRepos.remove(id)
+        endpointRepositoryFactory.settingsStore().clear(id)
 
         if (localStorage.getInt(PREF_ACTIVE_SERVER) == id) localStorage.remove(PREF_ACTIVE_SERVER)
         settingsDao.delete(id)
@@ -164,6 +170,11 @@ internal class ServerManagerImpl @Inject constructor(
     override suspend fun connectionStateProvider(serverId: Int): ServerConnectionStateProvider {
         val id = validateServerId(serverId)
         return connectionStateProviders.getOrCreate(id)
+    }
+
+    override suspend fun endpointRepository(serverId: Int): EndpointRepository {
+        val id = validateServerId(serverId)
+        return endpointRepos.getOrCreate(id)
     }
 
     private suspend fun getServerIdSanitize(serverId: Int): Int? {

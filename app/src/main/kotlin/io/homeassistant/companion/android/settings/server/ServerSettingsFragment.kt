@@ -35,6 +35,7 @@ import io.homeassistant.companion.android.launch.LaunchActivity
 import io.homeassistant.companion.android.launch.intentLaunchWithNavigateTo
 import io.homeassistant.companion.android.settings.ConnectionSecurityLevelFragment
 import io.homeassistant.companion.android.settings.SettingsActivity
+import io.homeassistant.companion.android.settings.endpoint.EndpointSettingsFragment
 import io.homeassistant.companion.android.settings.ssid.SsidFragment
 import io.homeassistant.companion.android.settings.url.ExternalUrlFragment
 import io.homeassistant.companion.android.settings.websocket.WebsocketSettingFragment
@@ -162,6 +163,18 @@ class ServerSettingsFragment :
                     Bundle().apply { putInt(ExternalUrlFragment.EXTRA_SERVER, serverId) },
                 )
                 addToBackStack(getString(commonR.string.input_url))
+            }
+            return@setOnPreferenceClickListener true
+        }
+
+        findPreference<Preference>("connection_dynamic_endpoint")?.setOnPreferenceClickListener {
+            parentFragmentManager.commit {
+                replace(
+                    R.id.content,
+                    EndpointSettingsFragment::class.java,
+                    Bundle().apply { putInt(EndpointSettingsFragment.EXTRA_SERVER, serverId) },
+                )
+                addToBackStack(getString(commonR.string.endpoint_setting_name))
             }
             return@setOnPreferenceClickListener true
         }

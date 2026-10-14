@@ -105,6 +105,14 @@ class AuthenticationRepositoryImpl internal constructor(
 
     private suspend fun ensureValidSession(forceRefresh: Boolean = false) {
         val server = server()
+
+        // Establishing or refreshing a session is a login, so the dynamic address is re-resolved
+        // first. It has to happen before the URL is read below, otherwise the refresh request would
+        // still go to the previous address.
+        if (server.session.isExpired() || forceRefresh) {
+            refreshDynamicAddressBeforeLogin()
+        }
+
         val url = connectionStateProvider().urlFlow().firstUrlOrNull()?.toHttpUrlOrNull()
         if (!server.session.isComplete() || server.session.installId != installId || url == null) {
             Timber.e("Unable to ensure valid session.")
@@ -113,6 +121,27 @@ class AuthenticationRepositoryImpl internal constructor(
 
         if (server.session.isExpired() || forceRefresh) {
             refreshSessionWithToken(url, server.session.refreshToken!!)
+        }
+    }
+
+    /**
+     * Re-runs the TXT/SRV resolution before a session is established.
+     *
+     * A failure here is never fatal on its own: the connection layer is the component that decides
+     * whether the resulting address may be used, see
+     * [io.homeassistant.companion.android.common.data.websocket.impl.WebSocketCoreImpl]. This method
+     * only makes sure the address the request is about to use has just been re-checked.
+     */
+    private suspend fun refreshDynamicAddressBeforeLogin() {
+        try {
+            val gate = serverManager.endpointRepository(serverId).ensureFreshBeforeConnect()
+            if (gate.isStale) {
+                Timber.w("Using an address that could not be re-validated: %s", gate.message)
+            } else if (!gate.mayConnect) {
+                Timber.e("No validated address is available for the session: %s", gate.message)
+            }
+        } catch (e: IllegalStateException) {
+            Timber.w(e, "Dynamic address check unavailable before login")
         }
     }
 

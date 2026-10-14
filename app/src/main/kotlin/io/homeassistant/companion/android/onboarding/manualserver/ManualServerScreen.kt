@@ -61,6 +61,7 @@ internal fun ManualServerScreen(
 ) {
     val serverUrl by viewModel.serverUrlFlow.collectAsStateWithLifecycle()
     val isServerUrlValid by viewModel.isServerUrlValidFlow.collectAsStateWithLifecycle()
+    val lookupFailure by viewModel.lookupFailureFlow.collectAsStateWithLifecycle()
 
     ManualServerScreen(
         onConnectClick = {
@@ -71,6 +72,7 @@ internal fun ManualServerScreen(
         serverUrl = serverUrl,
         onServerUrlChange = viewModel::onServerUrlChange,
         isServerUrlValid = isServerUrlValid,
+        lookupFailure = lookupFailure,
         modifier = modifier,
     )
 }
@@ -83,6 +85,7 @@ internal fun ManualServerScreen(
     onHelpClick: suspend () -> Unit,
     onServerUrlChange: (String) -> Unit,
     serverUrl: String,
+    lookupFailure: ManualServerViewModel.LookupFailure? = null,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -95,6 +98,7 @@ internal fun ManualServerScreen(
             serverUrl = serverUrl,
             onServerUrlChange = onServerUrlChange,
             isServerUrlValid = isServerUrlValid,
+            lookupFailure = lookupFailure,
             modifier = Modifier
                 .padding(contentPadding),
         )
@@ -107,6 +111,7 @@ private fun ManualServerContent(
     onConnectClick: () -> Unit,
     onServerUrlChange: (String) -> Unit,
     serverUrl: String,
+    lookupFailure: ManualServerViewModel.LookupFailure?,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -133,6 +138,7 @@ private fun ManualServerContent(
             serverUrl = serverUrl,
             onServerUrlChange = onServerUrlChange,
             isServerUrlValid = isServerUrlValid,
+            lookupFailure = lookupFailure,
             onConnectClick = onConnectClick,
         )
 
@@ -155,10 +161,24 @@ private fun ServerUrlTextField(
     onConnectClick: () -> Unit,
     onServerUrlChange: (String) -> Unit,
     serverUrl: String,
+    lookupFailure: ManualServerViewModel.LookupFailure?,
     modifier: Modifier = Modifier,
 ) {
     val focusRequester = remember { FocusRequester() }
     var isError by remember { mutableStateOf(serverUrl.isNotEmpty() && !isServerUrlValid) }
+
+    val lookupFailureMessage = when (lookupFailure) {
+        is ManualServerViewModel.LookupFailure.Message ->
+            stringResource(commonR.string.manual_server_dynamic_lookup_failed, lookupFailure.detail)
+
+        ManualServerViewModel.LookupFailure.PlaintextConfirmationRequired ->
+            stringResource(commonR.string.manual_server_dynamic_lookup_plaintext)
+
+        ManualServerViewModel.LookupFailure.InvalidResult ->
+            stringResource(commonR.string.manual_server_wrong_url)
+
+        null -> null
+    }
 
     HATextField(
         value = serverUrl,
@@ -198,14 +218,16 @@ private fun ServerUrlTextField(
             },
         ),
         supportingText = {
-            if (isError) {
+            val message = lookupFailureMessage
+                ?: stringResource(commonR.string.manual_server_wrong_url).takeIf { isError }
+            if (message != null) {
                 Text(
-                    text = stringResource(commonR.string.manual_server_wrong_url),
+                    text = message,
                     style = HATextStyle.BodyMedium.copy(color = LocalHAColorScheme.current.colorBorderDangerNormal),
                 )
             }
         },
-        isError = isError,
+        isError = isError || lookupFailureMessage != null,
         maxLines = 1,
         modifier = modifier.focusRequester(focusRequester),
     )

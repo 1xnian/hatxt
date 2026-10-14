@@ -35,6 +35,7 @@ import io.homeassistant.companion.android.common.util.tts.AndroidTextToSpeechEng
 import io.homeassistant.companion.android.common.util.tts.TextToSpeechClient
 import io.homeassistant.companion.android.di.qualifiers.NamedDeviceId
 import io.homeassistant.companion.android.di.qualifiers.NamedInstallId
+import io.homeassistant.companion.android.di.qualifiers.NamedEndpointStorage
 import io.homeassistant.companion.android.di.qualifiers.NamedIntegrationStorage
 import io.homeassistant.companion.android.di.qualifiers.NamedLegacyChangelogPref
 import io.homeassistant.companion.android.di.qualifiers.NamedManufacturer
@@ -95,6 +96,13 @@ internal abstract class DataModule {
         @Singleton
         fun provideIntegrationLocalStorage(@ApplicationContext appContext: Context): LocalStorage = LocalStorageImpl {
             appContext.getSharedPreferencesSuspend("integration_0")
+        }
+
+        @Provides
+        @NamedEndpointStorage
+        @Singleton
+        fun provideEndpointLocalStorage(@ApplicationContext appContext: Context): LocalStorage = LocalStorageImpl {
+            appContext.getSharedPreferencesSuspend("endpoint_0")
         }
 
         @Provides

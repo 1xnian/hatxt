@@ -26,6 +26,7 @@ import io.homeassistant.companion.android.common.R as commonR
 import io.homeassistant.companion.android.common.data.servers.ServerManager
 import io.homeassistant.companion.android.settings.assist.AssistSettingsFragment
 import io.homeassistant.companion.android.settings.developer.DeveloperSettingsFragment
+import io.homeassistant.companion.android.settings.endpoint.EndpointSettingsFragment
 import io.homeassistant.companion.android.settings.gestures.GesturesFragment
 import io.homeassistant.companion.android.settings.notification.NotificationHistoryFragment
 import io.homeassistant.companion.android.settings.qs.ManageTilesFragment
@@ -71,6 +72,9 @@ class SettingsActivity : BaseActivity() {
         data class HomeNetwork(val serverId: Int) : Deeplink
         data object NotificationHistory : Deeplink
 
+        /** Opens the dynamic (TXT / SRV) address settings of [serverId]. */
+        data class EndpointAddress(val serverId: Int) : Deeplink
+
         /** Opens the tile settings, preselecting [tileId] when one is given. */
         data class QSTile(val tileId: String? = null) : Deeplink
         data class Sensor(val sensorId: String) : Deeplink
@@ -113,6 +117,7 @@ class SettingsActivity : BaseActivity() {
                             }
                             Deeplink.Developer -> DeveloperSettingsFragment::class.java
                             is Deeplink.HomeNetwork -> SsidFragment::class.java
+                            is Deeplink.EndpointAddress -> EndpointSettingsFragment::class.java
                             Deeplink.NotificationHistory -> NotificationHistoryFragment::class.java
                             is Deeplink.Sensor -> SensorDetailFragment::class.java
                             is Deeplink.QSTile -> ManageTilesFragment::class.java
@@ -123,6 +128,12 @@ class SettingsActivity : BaseActivity() {
                         when (settingsNavigation) {
                             is Deeplink.HomeNetwork -> {
                                 Bundle().apply { putInt(SsidFragment.EXTRA_SERVER, settingsNavigation.serverId) }
+                            }
+
+                            is Deeplink.EndpointAddress -> {
+                                Bundle().apply {
+                                    putInt(EndpointSettingsFragment.EXTRA_SERVER, settingsNavigation.serverId)
+                                }
                             }
 
                             is Deeplink.Sensor -> {

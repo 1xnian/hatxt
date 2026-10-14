@@ -1,5 +1,6 @@
 package io.homeassistant.companion.android
 
+import android.app.Activity
 import android.app.Application
 import android.app.NotificationManager
 import android.bluetooth.BluetoothAdapter
@@ -10,6 +11,7 @@ import android.media.AudioManager
 import android.net.wifi.WifiManager
 import android.nfc.NfcAdapter
 import android.os.Build
+import android.os.Bundle
 import android.os.PowerManager
 import android.telephony.TelephonyManager
 import android.webkit.WebView
@@ -24,7 +26,10 @@ import coil3.network.NetworkRequest
 import coil3.network.NetworkResponse
 import coil3.network.okhttp.asNetworkClient
 import dagger.hilt.android.HiltAndroidApp
+import io.homeassistant.companion.android.common.data.endpoint.EndpointForegroundRefresher
+import io.homeassistant.companion.android.common.data.endpoint.EndpointRefreshWorker
 import io.homeassistant.companion.android.common.data.prefs.PrefsRepository
+import io.homeassistant.companion.android.common.data.servers.ServerManager
 import io.homeassistant.companion.android.common.sensors.AudioSensorManager
 import io.homeassistant.companion.android.common.sensors.LastUpdateManager
 import io.homeassistant.companion.android.common.sensors.SensorRepository
@@ -50,6 +55,7 @@ import io.homeassistant.companion.android.widgets.entity.EntityWidget
 import io.homeassistant.companion.android.widgets.mediaplayer.MediaPlayerControlsWidget
 import io.homeassistant.companion.android.widgets.template.TemplateWidget
 import io.homeassistant.companion.android.widgets.todo.TodoWidget
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -86,6 +92,20 @@ open class HomeAssistantApplication : Application() {
     @Inject
     internal lateinit var shortcutManager: HaShortcutManager
 
+    @Inject
+    internal lateinit var endpointForegroundRefresher: EndpointForegroundRefresher
+
+    @Inject
+    internal lateinit var serverManager: ServerManager
+
+    /**
+     * Number of activities between `onActivityStarted` and `onActivityStopped`.
+     *
+     * Used instead of a `ProcessLifecycleOwner` observer so no new dependency is introduced. Reaching
+     * 0 means the app left the foreground, 1 means it just came back.
+     */
+    private val startedActivities = AtomicInteger(0)
+
     override fun onCreate() {
         // We should initialize the logger as early as possible in the lifecycle of the application
         Timber.plant(Timber.DebugTree())
@@ -110,6 +130,7 @@ open class HomeAssistantApplication : Application() {
         Timber.i("Running ${BuildConfig.VERSION_NAME} on SDK $SdkVersion")
 
         registerActivityLifecycleCallbacks(LifecycleHandler)
+        registerEndpointRefreshLifecycle()
 
         ioScope.launch {
             initCrashReporting(
@@ -375,6 +396,53 @@ open class HomeAssistantApplication : Application() {
                 screenIntentFilter,
                 ContextCompat.RECEIVER_NOT_EXPORTED,
             )
+        }
+    }
+
+    /**
+     * Keeps the dynamic endpoint refresher in step with the app being visible.
+     *
+     * While the app is in the foreground the configured interval is honoured exactly, including the
+     * short intervals that Android's background scheduler cannot deliver. When the app leaves the
+     * foreground the loop stops and the periodic `WorkManager` job takes over at its own, slower
+     * pace. `start()` and `stop()` are idempotent, so a configuration change that recreates the
+     * activity cannot create a second timer.
+     */
+    private fun registerEndpointRefreshLifecycle() {
+        registerActivityLifecycleCallbacks(
+            object : Application.ActivityLifecycleCallbacks {
+                override fun onActivityStarted(activity: Activity) {
+                    val visible = startedActivities.incrementAndGet()
+                    if (visible != 1) return
+                    endpointForegroundRefresher.start()
+                    // Coming back to the foreground is a good moment to re-check the address.
+                    endpointForegroundRefresher.refreshNow()
+                    ioScope.launch { scheduleEndpointBackgroundRefresh() }
+                }
+
+                override fun onActivityStopped(activity: Activity) {
+                    if (startedActivities.decrementAndGet() <= 0) {
+                        startedActivities.set(0)
+                        endpointForegroundRefresher.stop()
+                    }
+                }
+
+                override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+                override fun onActivityResumed(activity: Activity) = Unit
+                override fun onActivityPaused(activity: Activity) = Unit
+                override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+                override fun onActivityDestroyed(activity: Activity) = Unit
+            },
+        )
+    }
+
+    private suspend fun scheduleEndpointBackgroundRefresh() {
+        val server = serverManager.getServer() ?: return
+        val settings = serverManager.endpointRepository(server.id).settings()
+        if (settings.periodicRefreshEnabled && settings.mode.usesDnsRecord) {
+            EndpointRefreshWorker.start(this, settings.refreshIntervalSeconds)
+        } else {
+            EndpointRefreshWorker.stop(this)
         }
     }
 

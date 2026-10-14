@@ -17,6 +17,14 @@ annotation class NamedSessionStorage
 annotation class NamedIntegrationStorage
 
 /**
+ * Qualifier for [LocalStorage] dependencies holding the dynamic endpoint configuration
+ * (resolution mode, record names, refresh interval, last validated address).
+ */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class NamedEndpointStorage
+
+/**
  * Qualifier for [LocalStorage] dependencies related to application themes.
  */
 @Qualifier

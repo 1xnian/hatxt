@@ -1,6 +1,7 @@
 package io.homeassistant.companion.android.common.data.servers
 
 import io.homeassistant.companion.android.common.data.authentication.AuthenticationRepository
+import io.homeassistant.companion.android.common.data.endpoint.EndpointRepository
 import io.homeassistant.companion.android.common.data.integration.IntegrationRepository
 import io.homeassistant.companion.android.common.data.servers.ServerManager.Companion.SERVER_ID_ACTIVE
 import io.homeassistant.companion.android.common.data.websocket.WebSocketRepository
@@ -112,6 +113,18 @@ interface ServerManager {
      * @throws IllegalStateException if there is no server with the provided ID
      */
     suspend fun connectionStateProvider(serverId: Int = SERVER_ID_ACTIVE): ServerConnectionStateProvider
+
+    /**
+     * Gets the [EndpointRepository] that owns the dynamic (TXT/SRV) address of the specified server.
+     *
+     * The repository is the entry point for the pre-connect check and for the settings screen. It
+     * writes the resolved address back into the server configuration, so consumers must not keep a
+     * separate copy of the URL.
+     *
+     * @param serverId the server ID, or [SERVER_ID_ACTIVE] for the currently active server
+     * @throws IllegalStateException if there is no server with the provided ID
+     */
+    suspend fun endpointRepository(serverId: Int = SERVER_ID_ACTIVE): EndpointRepository
 }
 
 /**

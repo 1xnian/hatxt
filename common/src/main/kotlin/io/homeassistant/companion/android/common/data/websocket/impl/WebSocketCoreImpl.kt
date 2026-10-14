@@ -306,6 +306,24 @@ internal class WebSocketCoreImpl(
     private suspend fun connectionStateProvider() = serverManager.connectionStateProvider(serverId)
 
     /**
+     * Re-resolves the server address before a session is opened.
+     *
+     * @return `true` when the connection may start. Only a configuration that explicitly forbids
+     *   reusing an older address, or a server without any validated address at all, returns `false`.
+     */
+    private suspend fun ensureFreshAddressBeforeConnecting(): Boolean = try {
+        val gate = serverManager.endpointRepository(serverId).ensureFreshBeforeConnect()
+        when {
+            gate.isStale -> Timber.w("Connecting to an address that could not be re-validated: %s", gate.message)
+            !gate.mayConnect -> Timber.e("Dynamic address check blocked the connection: %s", gate.message)
+        }
+        gate.mayConnect
+    } catch (e: IllegalStateException) {
+        Timber.w(e, "Dynamic address check unavailable, continuing with the configured address")
+        true
+    }
+
+    /**
      * Establishes a WebSocket connection and authenticates with the server.
      *
      * Multiple concurrent calls will share the same connection attempt - subsequent callers
@@ -317,6 +335,16 @@ internal class WebSocketCoreImpl(
     @VisibleForTesting
     suspend fun connect(): Boolean {
         val connectDeferred: CompletableDeferred<Boolean>
+
+        // Dynamic address gate. Opening a WebSocket is establishing a session, so the TXT/SRV record
+        // has to be re-checked right now and the resolved address has to be written to the server
+        // configuration *before* urlFlow below reads it. Without this, a session could be opened
+        // against a stale address; a scheduled background refresh is not a substitute because
+        // Android may delay it arbitrarily.
+        if (!ensureFreshAddressBeforeConnecting()) {
+            Timber.e("Not connecting, no validated server address is available")
+            return false
+        }
 
         // Track pending connection state locally within the urlObserverJob scope.
         // This is read across collectLatest invocations to cancel partial connections on URL change.

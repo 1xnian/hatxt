@@ -217,7 +217,9 @@ ksp-symbol-processing-api = { module = "com.google.devtools.ksp:symbol-processin
 ksp-symbol-processing-aa-embeddable = { module = "com.google.devtools.ksp:symbol-processing-aa-embeddable", version.ref = "ksp" }
 ksp-symbol-processing-common-deps = { module = "com.google.devtools.ksp:symbol-processing-common-deps", version.ref = "ksp" }
 ksp-symbol-processing-gradle-plugin = { module = "com.google.devtools.ksp:symbol-processing-gradle-plugin", version.ref = "ksp" }
-leakcanary-android = { module = "com.squareup.leakcanary:leakcanary-android", version.ref = "leakcanaryAndroid" }
+# Only the instrumentation artifact is used, and only by androidTest source sets. Adding
+# `com.squareup.leakcanary:leakcanary-android` to `debugImplementation` is what used to inject the
+# extra "Leaks" launcher into the debug APK and break dependency locking, see gradle.properties.
 leakcanary-android-instrumentation = { module = "com.squareup.leakcanary:leakcanary-android-instrumentation", version.ref = "leakcanaryAndroid" }
 lint-api = { group = "com.android.tools.lint", name = "lint-api", version.ref = "androidTools" }
 lint-checks = { group = "com.android.tools.lint", name = "lint-checks", version.ref = "androidTools" }

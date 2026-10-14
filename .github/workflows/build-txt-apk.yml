@@ -1,24 +1,40 @@
-name: Build HA Android TXT APK
+name: Build HA Android dynamic address APK
+
+# Builds the minimal debug APK, runs the unit tests of the dynamic (TXT/SRV) endpoint resolver and
+# verifies the produced APK instead of trusting the source tree.
+#
+# Why this workflow exists in this shape:
+#   * The previous revision passed -PnoLeakCanary=true while the committed dependency lock state had
+#     been resolved *with* LeakCanary. The configuration and the lock state disagreed, so every
+#     locked build failed with
+#       org.gradle.internal.locking.LockOutOfDateException: Did not resolve
+#       'com.squareup.leakcanary:shark:2.14' which is part of the dependency lock state
+#     The dependency declaration was removed instead (see gradle.properties), so the resolved graph
+#     and the lock files agree by construction and the flag is no longer needed or passed.
+#   * The debug APK used to carry a second launcher entry called "Leaks" that came from the
+#     LeakCanary debug dependency. Removing the declaration removes that entry; the inspection step
+#     fails the job if it ever comes back.
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
 
 permissions:
   contents: read
 
 concurrency:
-  group: txt-apk-${{ github.ref }}
+  group: dynamic-address-apk-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    name: Build and inspect Minimal Debug APK
+    name: Build, test and inspect Minimal Debug APK
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -27,101 +43,127 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: "21"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          # 'basic' uses the MIT licensed GitHub Actions cache instead of the proprietary one.
+          cache-provider: basic
 
-      - name: Prepare Google Services config
-        run: cp .github/mock-google-services.json app/google-services.json
+      - name: Verify the Gradle wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The wrapper must keep its executable bit in git (mode 100755). Fixing the mode here is a
+          # safety net for checkouts that lost it; the authoritative fix lives in the repository.
+          if [ ! -x gradlew ]; then
+            echo "::warning::gradlew lost its executable bit in this checkout, restoring it."
+            chmod +x gradlew
+          fi
+          ./gradlew --version
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+      - name: Install the Android SDK packages required by compileSdk 37
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools" \
+              -maxdepth 3 -type f -name sdkmanager | head -n1)"
+          fi
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
+
+      - name: Provide mocked Google Services configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/mock-google-services.json app/google-services.json
+          cp .github/mock-google-services.json wear/google-services.json
+          cp .github/mock-google-services.json automotive/google-services.json
+
+      - name: Resolve the locked runtime classpath
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics
+          # Dependency locking is enabled project wide. Resolving here proves that the committed lock
+          # state matches the declared graph: a mismatch aborts with LockOutOfDateException instead
+          # of silently drifting to another version.
+          ./gradlew :app:dependencies --configuration minimalDebugRuntimeClasspath > diagnostics/dependencies-minimalDebug.txt
+          {
+            echo "Lock state resolved successfully for minimalDebugRuntimeClasspath."
+            echo "LeakCanary entries in the resolved runtime classpath (expected: none):"
+            grep -ci leakcanary diagnostics/dependencies-minimalDebug.txt || true
+          } | tee diagnostics/lock-state.txt
+
+      - name: Run unit tests of the endpoint resolver
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :common:testDebugUnitTest --stacktrace
+
+      - name: Run the remaining unit tests (informational)
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          ./gradlew :app:testMinimalDebugUnitTest --stacktrace
 
       - name: Build Minimal Debug APK
-        run: ./gradlew -PnoLeakCanary=true :app:assembleMinimalDebug --no-daemon --stacktrace
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :app:assembleMinimalDebug --stacktrace
 
       - name: Static APK inspection
         if: always()
         shell: bash
-        run: |
-          set -u
-          mkdir -p diagnostics
-          report="diagnostics/apk-inspection.txt"
-          {
-            echo "Home Assistant Android TXT APK static inspection"
-            echo "Generated: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-            echo "Commit: ${GITHUB_SHA:-unknown}"
-            echo
-            echo "== Build output files =="
-            find app/build/outputs/apk -maxdepth 8 -type f -printf '%p (%s bytes)\n' 2>/dev/null || true
-            echo
-            echo "== Source manifest launcher declarations =="
-            grep -RIn --include='AndroidManifest.xml' -E 'android.intent.action.MAIN|android.intent.category.LAUNCHER|android.intent.category.LEANBACK_LAUNCHER|Leaks|leakcanary' app/src 2>/dev/null || true
-            echo
-            echo "== LeakCanary build configuration =="
-            grep -n -E 'noLeakCanary|leakcanary' gradle.properties build-logic/convention/src/main/kotlin/AndroidCommonConventionPlugin.kt gradle/libs.versions.toml 2>/dev/null || true
-            echo
-            echo "== TXT resolver source files =="
-            find app/src -type f '(' -name '*Txt*' -o -name '*ManualServer*' ')' -print 2>/dev/null || true
-          } > "$report"
+        run: bash .github/scripts/apk-static-inspection.sh
 
-          apk="$(find app/build/outputs/apk -type f -name '*.apk' -print -quit 2>/dev/null || true)"
-          if [ -z "$apk" ]; then
-            echo "No APK found. The build may have failed before producing an APK." >> "$report"
-            exit 0
-          fi
-
-          {
-            echo
-            echo "== Selected APK =="
-            echo "$apk"
-            echo "SHA-256: $(sha256sum "$apk" | awk '{print $1}')"
-            echo
-            echo "== APK badging (package, label, launchable activity) =="
-          } >> "$report"
-
-          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-          aapt=""
-          if [ -n "$sdk" ] && [ -d "$sdk/build-tools" ]; then
-            aapt="$(find "$sdk/build-tools" -type f -name aapt -print 2>/dev/null | sort -V | tail -n 1)"
-          fi
-          if [ -n "$aapt" ]; then
-            "$aapt" dump badging "$apk" >> "$report" 2>&1 || true
-            {
-              echo
-              echo "== Merged binary AndroidManifest.xml (activity and intent filters) =="
-            } >> "$report"
-            "$aapt" dump xmltree "$apk" AndroidManifest.xml 2>&1 | grep -E -A 5 -B 3 'E: application|E: activity|E: activity-alias|E: intent-filter|android.intent.action.MAIN|android.intent.category.LAUNCHER|android.intent.category.LEANBACK_LAUNCHER|Leaks|leakcanary|android:label|android:name' >> "$report" || true
-          else
-            echo "aapt was not found under Android SDK build-tools; package/manifest dump unavailable." >> "$report"
-          fi
-
-          {
-            echo
-            echo "== APK archive entries related to LeakCanary =="
-            unzip -l "$apk" 2>/dev/null | grep -i -E 'leakcanary|leak_activity|leakactivity' || echo "No matching archive entry names (DEX class references require deeper inspection)."
-            echo
-            echo "== APK archive entries related to manifest and dex =="
-            unzip -l "$apk" 2>/dev/null | grep -E 'AndroidManifest.xml|classes[0-9]*\.dex|resources.arsc' || true
-          } >> "$report"
-
-          cat "$report"
-
-      - name: Upload APK artifact
-        if: success()
+      - name: Upload APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: home-assistant-txt-minimal-debug-apk
+          name: home-assistant-dynamic-address-minimal-debug-apk
           path: app/build/outputs/apk/**/*.apk
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
 
       - name: Upload static inspection report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: home-assistant-txt-apk-diagnostics
-          path: diagnostics/apk-inspection.txt
+          name: apk-static-inspection-report
+          path: |
+            diagnostics/apk-static-inspection-report.md
+            diagnostics/merged-manifest.txt
+            diagnostics/dependencies-minimalDebug.txt
+            diagnostics/lock-state.txt
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: |
+            common/build/reports/tests/**
+            common/build/test-results/**
+            app/build/reports/tests/**
+            app/build/test-results/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build/reports/**
+            */build/reports/**
+          if-no-files-found: warn
+          retention-days: 7
