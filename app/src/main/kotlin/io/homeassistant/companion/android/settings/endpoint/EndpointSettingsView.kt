@@ -30,7 +30,6 @@ import io.homeassistant.companion.android.common.R as commonR
 import io.homeassistant.companion.android.common.data.endpoint.EndpointRefreshPolicy
 import io.homeassistant.companion.android.common.data.endpoint.EndpointResolutionMode
 import io.homeassistant.companion.android.common.data.endpoint.EndpointResolutionStatus
-import io.homeassistant.companion.android.common.data.endpoint.EndpointSettings
 import io.homeassistant.companion.android.common.data.endpoint.EndpointSnapshot
 import io.homeassistant.companion.android.common.data.endpoint.EndpointStalePolicy
 import io.homeassistant.companion.android.util.compose.HaAlertWarning

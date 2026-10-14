@@ -1,3 +1,7 @@
+> **⚠️ Outdated document, kept for history.**
+> Start with **[`README-动态地址解析.md`](README-动态地址解析.md)** (Chinese) instead: it covers the
+> unified TXT + SRV resolver, the settings screen and the rewritten GitHub Actions workflow.
+
 # TXT build quick start
 
 This repository is the Home Assistant Android source with an initial TXT URL resolver and a GitHub Actions workflow.

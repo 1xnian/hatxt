@@ -1,3 +1,8 @@
+> **⚠️ Outdated document, kept for history.**
+> The initial TXT resolver described here has been replaced by a unified TXT + SRV resolver.
+> Read **[`README-动态地址解析.md`](README-动态地址解析.md)** (Chinese) for the current design,
+> build steps and acceptance status.
+
 # Home Assistant Android — TXT URL build
 
 This source tree is based on the Home Assistant Android project and includes an initial `txt://` URL resolver in the manual server onboarding flow.

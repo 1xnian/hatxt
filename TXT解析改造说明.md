@@ -1,3 +1,8 @@
+> **⚠️ 本文档已过时（历史存档）。**
+> 这里描述的初版 TXT 实现（`TxtRecordUrlResolver`）已被**完整重构并删除**，取而代之的是同时支持
+> TXT 与 SRV 的统一解析模块。请阅读 **[`README-动态地址解析.md`](README-动态地址解析.md)**。
+> 旧实现的问题与新架构的说明见该文档的「旧实现去哪了」一节。
+
 # Home Assistant Android TXT 解析改造（初版）
 
 基于上传的 Home Assistant Android 官方源码，增加了在首次手动添加服务器时使用 `txt://` 前缀查询 DNS TXT 并转换为 HTTP(S) 地址的能力。
