@@ -1,0 +1,55 @@
+package io.homeassistant.companion.android.util.vehicle
+
+import io.homeassistant.companion.android.common.R
+import io.homeassistant.companion.android.common.data.integration.Entity
+import io.homeassistant.companion.android.common.data.integration.IntegrationDomains.ALARM_CONTROL_PANEL_DOMAIN
+import io.homeassistant.companion.android.common.data.integration.IntegrationDomains.COVER_DOMAIN
+import io.homeassistant.companion.android.common.data.integration.IntegrationDomains.DEVICE_TRACKER_DOMAIN
+import io.homeassistant.companion.android.common.data.integration.IntegrationDomains.FAN_DOMAIN
+import io.homeassistant.companion.android.common.data.integration.IntegrationDomains.LIGHT_DOMAIN
+import io.homeassistant.companion.android.common.data.integration.IntegrationDomains.PERSON_DOMAIN
+import io.homeassistant.companion.android.common.data.integration.display.EntityDisplay
+
+val SUPPORTED_DOMAINS_WITH_STRING = mapOf(
+    ALARM_CONTROL_PANEL_DOMAIN to R.string.alarm_control_panels,
+    "button" to R.string.buttons,
+    COVER_DOMAIN to R.string.covers,
+    FAN_DOMAIN to R.string.fans,
+    "input_boolean" to R.string.input_booleans,
+    "input_button" to R.string.input_buttons,
+    LIGHT_DOMAIN to R.string.lights,
+    "lock" to R.string.locks,
+    "scene" to R.string.scenes,
+    "script" to R.string.scripts,
+    "switch" to R.string.switches,
+)
+val SUPPORTED_DOMAINS = SUPPORTED_DOMAINS_WITH_STRING.keys
+
+val MAP_DOMAINS = listOf(
+    DEVICE_TRACKER_DOMAIN,
+    PERSON_DOMAIN,
+    "sensor",
+    "zone",
+)
+
+val NOT_ACTIONABLE_DOMAINS = listOf(
+    ALARM_CONTROL_PANEL_DOMAIN,
+    "binary_sensor",
+    "sensor",
+)
+
+fun isVehicleDomain(entity: Entity): Boolean {
+    return entity.domain in SUPPORTED_DOMAINS ||
+        entity.domain in NOT_ACTIONABLE_DOMAINS ||
+        canNavigate(entity)
+}
+
+fun canNavigate(entity: Entity): Boolean {
+    return (
+        entity.domain in MAP_DOMAINS &&
+            ((entity.attributes["latitude"] as? Number)?.toDouble() != null) &&
+            ((entity.attributes["longitude"] as? Number)?.toDouble() != null)
+        )
+}
+
+fun canNavigate(entity: EntityDisplay): Boolean = entity.domain in MAP_DOMAINS && entity.coordinates != null

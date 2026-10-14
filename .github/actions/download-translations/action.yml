@@ -1,0 +1,61 @@
+name: "Download Translations"
+description: "Reaches out to Lokalise to download the latest translations."
+inputs:
+  lokalise-project:
+    description: "The project id in lokalise"
+    required: true
+  lokalise-token:
+    description: "An API token that has read access to the desired project"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Pull from Lokalise
+      uses: lokalise/lokalise-pull-action@2a9bba5071f83a2b8ac0a8b59c740e73cc1453a7 # v5.4.0
+      with:
+        api_token: ${{ inputs.lokalise-token }}
+        project_id: ${{ inputs.lokalise-project }}
+        custom_github_token: "FAKE_GH_TOKEN"
+        file_format: xml
+        async_mode: true
+        skip_include_tags: true
+        skip_original_filenames: true
+        additional_params: |
+          original_filenames: false
+          bundle_structure: common/src/main/res/values-%LANG_ISO%/strings.%FORMAT%
+          add_newline_eof: true
+          replace_breaks: true
+          export_empty_as: skip
+
+    # Source strings (English) are managed in git, not Lokalise.
+    # Restore the file in case Lokalise overwrote it.
+    - name: Revert source strings to git version
+      shell: bash
+      run: |
+        git checkout common/src/main/res/values/strings.xml
+        git status
+
+    - name: Generate locales_config.xml
+      shell: bash
+      run: |
+        XML_START='<?xml version="1.0" encoding="utf-8"?>\n<locale-config xmlns:android="http://schemas.android.com/apk/res/android">\n'
+        XML_LOCALES=''
+        XML_END='</locale-config>'
+        for i in common/src/main/res/values*/strings.xml; do
+          FOLDER="$(basename $(dirname $i))"
+          CODE="${FOLDER#*-}" # remove "values-"
+          CODE="${CODE/-r/-}" # replace region "-rXX" with "-XX"
+          CODE="${CODE#b+}" # BCP 47 folder "b+xx+Yyyy" becomes "xx-Yyyy"
+          CODE="${CODE//+/-}"
+          if [ "$CODE" == "values" ]; then CODE="en"; fi
+          XML_LOCALES="$XML_LOCALES    <locale android:name=\"$CODE\"/>\n"
+        done
+        printf "$XML_START$XML_LOCALES$XML_END" > app/src/main/res/xml/locales_config.xml
+        printf "$XML_START$XML_LOCALES$XML_END" > wear/src/main/res/xml/locales_config.xml
+
+        echo "Complete"
+
+    - name: Zip Translations
+      shell: bash
+      run: zip -r strings.zip common/src/main/res/values/strings.xml common/src/main/res/values-*/strings.xml
+

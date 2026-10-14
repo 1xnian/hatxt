@@ -1,0 +1,1403 @@
+package io.homeassistant.companion.android.common.data.websocket.impl
+
+import androidx.annotation.GuardedBy
+import androidx.annotation.VisibleForTesting
+import io.homeassistant.companion.android.common.data.HomeAssistantApis.Companion.USER_AGENT
+import io.homeassistant.companion.android.common.data.HomeAssistantApis.Companion.USER_AGENT_STRING
+import io.homeassistant.companion.android.common.data.HomeAssistantVersion
+import io.homeassistant.companion.android.common.data.authentication.AuthorizationException
+import io.homeassistant.companion.android.common.data.servers.ServerManager
+import io.homeassistant.companion.android.common.data.servers.UrlState
+import io.homeassistant.companion.android.common.data.websocket.HAWebSocketException
+import io.homeassistant.companion.android.common.data.websocket.WebSocketCore
+import io.homeassistant.companion.android.common.data.websocket.WebSocketRequest
+import io.homeassistant.companion.android.common.data.websocket.WebSocketState
+import io.homeassistant.companion.android.common.data.websocket.impl.WebSocketConstants.EVENT_AREA_REGISTRY_UPDATED
+import io.homeassistant.companion.android.common.data.websocket.impl.WebSocketConstants.EVENT_DEVICE_REGISTRY_UPDATED
+import io.homeassistant.companion.android.common.data.websocket.impl.WebSocketConstants.EVENT_ENTITY_REGISTRY_UPDATED
+import io.homeassistant.companion.android.common.data.websocket.impl.WebSocketConstants.EVENT_STATE_CHANGED
+import io.homeassistant.companion.android.common.data.websocket.impl.WebSocketConstants.SUBSCRIBE_TYPE_ASSIST_PIPELINE_RUN
+import io.homeassistant.companion.android.common.data.websocket.impl.WebSocketConstants.SUBSCRIBE_TYPE_RENDER_TEMPLATE
+import io.homeassistant.companion.android.common.data.websocket.impl.WebSocketConstants.SUBSCRIBE_TYPE_SUBSCRIBE_ENTITIES
+import io.homeassistant.companion.android.common.data.websocket.impl.WebSocketConstants.SUBSCRIBE_TYPE_SUBSCRIBE_TRIGGER
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.AreaRegistryUpdatedEvent
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.AssistPipelineError
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.AssistPipelineEvent
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.AssistPipelineEventType
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.AssistPipelineIntentEnd
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.AssistPipelineIntentProgress
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.AssistPipelineIntentStart
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.AssistPipelineRunStart
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.AssistPipelineSttEnd
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.AssistPipelineTtsEnd
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.AuthInvalidSocketResponse
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.AuthOkSocketResponse
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.AuthRequiredSocketResponse
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.CompressedStateChangedEvent
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.DeviceRegistryUpdatedEvent
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.EntityRegistryUpdatedEvent
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.EventResponse
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.EventSocketResponse
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.MessageSocketResponse
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.PongSocketResponse
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.RawMessageSocketResponse
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.SocketResponse
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.StateChangedEvent
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.TemplateUpdatedEvent
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.TriggerEvent
+import io.homeassistant.companion.android.common.data.websocket.impl.entities.UnknownTypeSocketResponse
+import io.homeassistant.companion.android.common.util.FailFast
+import io.homeassistant.companion.android.common.util.MapAnySerializer
+import io.homeassistant.companion.android.common.util.kotlinJsonMapper
+import io.homeassistant.companion.android.util.sensitive
+import java.io.IOException
+import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.cancellation.CancellationException
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.channels.consumeEach
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.consumeAsFlow
+import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import okio.ByteString
+import okio.ByteString.Companion.toByteString
+import timber.log.Timber
+
+private val DELAY_BEFORE_RECONNECT = 10.seconds
+
+/** Upper bound for the backoff between reconnection attempts while the server stays unreachable. */
+private val MAX_DELAY_BEFORE_RECONNECT = 2.minutes
+
+/**
+ * Implementation of the [WebSocketCore] interface for managing WebSocket connections to a Home Assistant server.
+ *
+ * ### Implementation Details:
+ *
+ * #### Message handling:
+ * - All incoming messages are received in [onMessage], parsed, and dispatched to their appropriate handlers based on their types and IDs.
+ * - Messages are processed sequentially using the [messageQueue], ensuring that each message is handled in order without race conditions.
+ * - The [activeMessages] map is used to track requests and their corresponding IDs. If no matching ID is found or an error occurs, the message is dropped.
+ *
+ * #### Connection lifecycle:
+ * - The WebSocket connection will automatically close itself after the last subscription created with [subscribeTo] is dismissed.
+ * - Calling [sendMessage] will open the connection if it is closed. Once the connection is open, it remains open and does not close automatically.
+ * - If the connection is lost or closed, the implementation waits for [DELAY_BEFORE_RECONNECT] before attempting to reconnect.
+ *
+ * #### Reconnection and re-subscription:
+ * - On failure or when the socket is closing, if there are active subscriptions created with [subscribeTo], the implementation will automatically retry to open the connection until it succeeds.
+ * - Upon reconnection, the implementation resubscribes to all active subscriptions to ensure continuity. Each attempt is tracked as an [ActiveMessage.Reconnecting] entry until the server acknowledges it.
+ * - A subscription the server actively rejects is retried indefinitely with capped backoff — it is never abandoned while its collector is still listening. An attempt that receives no answer cancels the socket so restoration resumes on a clean connection where no ambiguous acceptance can linger.
+ * - Restoration always starts when a connection is established, whoever established it: any subscription still tracked from a previous connection is restored (for example after the reconnection loop gave up on an authentication failure and a later [sendMessage] reconnects).
+ *
+ * #### Supported features:
+ * - If the connected server version is 2022.9 or above, the implementation automatically sends a `supported_features` message after the connection is established.
+ *
+ * #### Threading:
+ * - Connection lifecycle (creation, authentication, closure) is protected by [connectedMutex].
+ * - Outbound messages are serialized through a dedicated channel to ensure ordering.
+ * - The [eventSubscriptionMutex] ensures that only one subscription is created for multiple invocations with the same parameters.
+ * - The implementation uses coroutines extensively for asynchronous operations, ensuring non-blocking behavior.
+ *
+ * @param okHttpClient The HTTP client used to establish the WebSocket connection.
+ * @param serverManager Manages server configurations and authentication.
+ * @param serverId The ID of the server to connect to.
+ * @param wsScope The coroutine scope used for WebSocket operations. Defaults to a scope with `Dispatchers.IO`.
+ * @param backgroundScope A dedicated scope for background tasks, primarily used for testing.
+ */
+internal class WebSocketCoreImpl(
+    private val okHttpClient: OkHttpClient,
+    private val serverManager: ServerManager,
+    private val serverId: Int,
+    private val wsScope: CoroutineScope = CoroutineScope(
+        Dispatchers.IO + SupervisorJob() +
+            CoroutineExceptionHandler { ctx, err -> Timber.e(err, "Uncaught exception in WebSocketCoreImpl") },
+    ),
+    // We need a dedicated scope in test to control job that are in background
+    private val backgroundScope: CoroutineScope = wsScope,
+) : WebSocketListener(),
+    WebSocketCore {
+
+    /**
+     * Tracks active WebSocket requests by their unique IDs.
+     * We never modify the entries in the map, only add or remove.
+     */
+    @VisibleForTesting
+    val activeMessages = ConcurrentHashMap<Long, ActiveMessage>()
+
+    // Each message that we send needs a unique ID to match it to the answer
+    private val id = AtomicLong(1)
+
+    private val connectionHolder = AtomicReference<ConnectionHolder?>(null)
+
+    /**
+     * Represents the current state of the WebSocket connection.
+     *
+     * **Thread safety:** This variable is accessed from both the coroutine thread (in [connect])
+     * and the OkHttp callback thread (in [WebSocketListener] methods). However, no synchronization
+     * is needed because:
+     * - The coroutine only sets this when no WebSocket exists yet (URL is null or creation failed),
+     *   meaning no listener callbacks can occur.
+     * - Once a WebSocket is created, only the listener callbacks ([onOpen], [handleAuthComplete],
+     *   [handleClosingSocket]) modify this state.
+     *
+     * This ensures there's no concurrent modification - the coroutine and listener never write
+     * to this variable at the same time.
+     */
+    private var connectionState: WebSocketState = WebSocketState.Initial
+
+    /**
+     * Used to communicate the close reason to [handleClosingSocket] when closing due to URL change.
+     * This allows the close reason to be set before calling [WebSocket.cancel], which triggers [onFailure].
+     * It is important to keep the previous state to help in the decision of reconnecting or not.
+     */
+    @Volatile
+    private var pendingCloseReason: WebSocketState.Closed.Reason? = null
+
+    /**
+     * The running job working to get the tracked subscriptions restored, replaced on each
+     * closing and each establishment of the connecton so only one runs at a time.
+     */
+    @GuardedBy("connectedMutex")
+    private var reconnectJob: Job? = null
+
+    /**
+     * A [CompletableDeferred] that signals the establishment and authentication of a WebSocket connection.
+     *
+     * This deferred value completes with the [HomeAssistantVersion] (if available null is sent otherwise) upon successful authentication.
+     * It completes with an [Exception] if [onFailure] is invoked.
+     * It completes with an [AuthorizationException] if the authentication fails.
+     *
+     * A new instance is created when the connection closes, so it can be reused to reconnect.
+     *
+     * **Thread safety:** Reassignment of this reference is protected by [connectedMutex].
+     * Operations on the deferred itself are thread-safe.
+     */
+    @GuardedBy("connectedMutex")
+    private var authCompleted = CompletableDeferred<HomeAssistantVersion?>()
+
+    /**
+     * Tracks an in-progress connection attempt. When non-null, subsequent callers to [connect]
+     * will await this deferred instead of starting a new connection attempt.
+     *
+     * **Thread safety:** Access is protected by [connectedMutex].
+     */
+    @GuardedBy("connectedMutex")
+    private var pendingConnectDeferred: CompletableDeferred<Boolean>? = null
+
+    /**
+     * Protects connection lifecycle operations (creation, authentication, closure).
+     * Ensures only one connection attempt runs at a time and prevents race conditions
+     * between multiples [connect] and [handleClosingSocket].
+     */
+    private val connectedMutex = Mutex()
+
+    /**
+     * Protects subscription operations to ensure only one subscription is created
+     * for multiple invocations with the same parameters. Also guards unsubscription
+     * during flow cancellation.
+     */
+    private val eventSubscriptionMutex = Mutex()
+
+    /**
+     * Queue for processing incoming WebSocket messages sequentially.
+     * Each message handler is wrapped in a [Job] and executed one at a time,
+     * ensuring messages are processed in order without race conditions.
+     *
+     * It uses the [backgroundScope] scope to do the send operation.
+     */
+    private val messageQueue = Channel<Job>(capacity = Channel.UNLIMITED).apply {
+        backgroundScope.launch {
+            consumeEach { it.join() }
+        }
+    }
+
+    /**
+     * Channel for send commands one by one in sequential order. It could have been
+     * a coroutine Actor but the Actor API is obsolete.
+     *
+     * This is to ensure that the order of sending command is respected.
+     *
+     * It uses the [backgroundScope] scope to do the send operation.
+     */
+    private val sendCommandChannel = Channel<Command<*>>(capacity = Channel.UNLIMITED).apply {
+        backgroundScope.launch {
+            consumeEach {
+                processSendCommand(it)
+            }
+        }
+    }
+
+    /**
+     * Processes the send command by enqueuing it on the connection, it does not directly make the network call.
+     *
+     * @param command The command to process. Its [Command.sendCompleted] will be completed
+     *                to indicate success or failure for sending.
+     */
+    private fun processSendCommand(command: Command<*>) {
+        val currentConnection = connectionHolder.get()?.webSocket
+        if (currentConnection == null) {
+            command.sendCompleted.completeExceptionally(
+                HAWebSocketException("No connection to send the message to"),
+            )
+            return
+        }
+        when (command) {
+            is Command.WithAnswer -> {
+                val id = id.getAndIncrement()
+                val outbound = command.request.message.plus("id" to id)
+                Timber.d("Sending message $id: ${sensitive { outbound.toString() }}")
+                activeMessages[id] = command.toActiveMessage()
+                val result = currentConnection.send(
+                    kotlinJsonMapper.encodeToString(MapAnySerializer, outbound),
+                )
+                if (!result) {
+                    Timber.e("Failed to send message $id")
+                    activeMessages.remove(id)
+                    command.sendCompleted.completeExceptionally(HAWebSocketException("Failed to send message"))
+                } else {
+                    command.sendCompleted.complete(id)
+                }
+            }
+
+            is Command.Bytes -> {
+                val result = currentConnection.send(command.data.toByteString())
+                command.sendCompleted.complete(result)
+            }
+        }
+    }
+
+    override suspend fun server() = serverManager.getServer(serverId)
+
+    private suspend fun connectionStateProvider() = serverManager.connectionStateProvider(serverId)
+
+    /**
+     * Establishes a WebSocket connection and authenticates with the server.
+     *
+     * Multiple concurrent calls will share the same connection attempt - subsequent callers
+     * will await the result of the first caller's connection attempt rather than starting
+     * a new one.
+     *
+     * @return `true` if the connection is successful and authenticated, `false` otherwise.
+     */
+    @VisibleForTesting
+    suspend fun connect(): Boolean {
+        val connectDeferred: CompletableDeferred<Boolean>
+
+        // Track pending connection state locally within the urlObserverJob scope.
+        // This is read across collectLatest invocations to cancel partial connections on URL change.
+        var pendingWebSocket: WebSocket? = null
+        var urlObserverJob: Job? = null
+
+        connectedMutex.withLock {
+            // Already connected?
+            if (connectionHolder.get() != null && authCompleted.isCompleted) {
+                if (authCompleted.isCancelled) Timber.w("Trying to connect but was cancelled")
+                return !authCompleted.isCancelled
+            }
+
+            // Connection already in progress? Reuse its deferred
+            pendingConnectDeferred?.takeIf { !it.isCompleted }?.let { existing ->
+                Timber.d("Connection already in progress, reusing existing deferred and release lock")
+                connectDeferred = existing
+                return@withLock
+            }
+
+            // Start new connection attempt
+            connectDeferred = CompletableDeferred()
+            pendingConnectDeferred = connectDeferred
+
+            // Cancel any existing URL observer
+            connectionHolder.get()?.urlObserverJob?.cancel()
+
+            urlObserverJob = wsScope.launch {
+                connectionStateProvider().urlFlow()
+                    .collectLatest { urlState ->
+                        connectedMutex.withLock {
+                            // This lock might wait for the first withLock to finish but it should be fast
+                            val url = (urlState as? UrlState.HasUrl)?.url
+                            if (!connectDeferred.isCompleted) {
+                                handleNewConnectionAttempt(
+                                    url = url,
+                                    pendingWebSocket = pendingWebSocket,
+                                    connectDeferred = connectDeferred,
+                                    urlObserverJob = urlObserverJob!!,
+                                    setPendingWebSocket = { pendingWebSocket = it },
+                                )
+                            } else if (url != connectionHolder.get()?.url) {
+                                // Already connected but URL changed
+                                handleUrlChangeWhileConnected(urlState)
+                            }
+                        }
+                    }
+            }.apply {
+                invokeOnCompletion {
+                    if (!connectDeferred.isCompleted) {
+                        connectDeferred.complete(false)
+                    }
+                }
+            }
+        }
+
+        return connectDeferred.await()
+    }
+
+    /**
+     * Intentionally closes the WebSocket connection with the given code and reason.
+     *
+     * New connection attempts can be made after this call.
+     */
+    private fun close(code: Int, reason: String?) = wsScope.launch {
+        connectedMutex.withLock {
+            // An intentional close also stops the restore loop, otherwise a shutdown could
+            // leave it running and re-establishing the connection that was just closed
+            reconnectJob?.cancel()
+            reconnectJob = null
+
+            val holder = connectionHolder.getAndSet(null)
+            holder?.webSocket?.close(code, reason)
+            holder?.urlObserverJob?.cancel()
+
+            cleanupClosingSocket()
+        }
+    }
+
+    /**
+     * Handles a new connection attempt when not yet connected.
+     * This is called when the URL flow emits before [connectDeferred] is completed.
+     */
+    private suspend fun handleNewConnectionAttempt(
+        url: URL?,
+        pendingWebSocket: WebSocket?,
+        connectDeferred: CompletableDeferred<Boolean>,
+        urlObserverJob: Job,
+        setPendingWebSocket: (WebSocket?) -> Unit,
+    ) {
+        // Clean up any partial connection before using this URL.
+        connectionHolder.set(null)
+        pendingWebSocket?.cancel()
+        setPendingWebSocket(null)
+        authCompleted = CompletableDeferred()
+
+        if (url == null) {
+            Timber.w("No URL available to open WebSocket connection")
+            connectionState = WebSocketState.ClosedOther
+            connectDeferred.complete(false)
+            urlObserverJob.cancel()
+            return
+        }
+
+        when (val attemptResult = attemptWebSocketConnection(url)) {
+            is ConnectionAttemptResult.Failed -> {
+                connectDeferred.complete(false)
+                urlObserverJob.cancel()
+            }
+
+            is ConnectionAttemptResult.Success -> {
+                val webSocket = attemptResult.webSocket
+                setPendingWebSocket(webSocket)
+
+                val authSuccess = awaitAuthAndSetupConnectionHolder(
+                    webSocket = webSocket,
+                    url = url,
+                    urlObserverJob = urlObserverJob,
+                )
+                if (authSuccess) restoreLeftoverSubscriptions()
+                connectDeferred.complete(authSuccess)
+            }
+        }
+    }
+
+    private fun handleUrlChangeWhileConnected(urlState: UrlState) {
+        val currentHolder = connectionHolder.get()
+        if (urlState is UrlState.InsecureState) {
+            Timber.w("Insecure state, disconnecting immediately.")
+        } else {
+            Timber.w("URL changed, disconnecting immediately.")
+        }
+
+        if (currentHolder == null) {
+            connectionState = WebSocketState.ClosedUrlChange
+        } else {
+            // Set pending reason before cancel() so handleClosingSocket knows to reconnect immediately
+            pendingCloseReason = WebSocketState.Closed.Reason.CHANGED_URL
+            currentHolder.webSocket.cancel()
+        }
+    }
+
+    /**
+     * Attempts to create a WebSocket connection and send the authentication message.
+     *
+     * @return The result of the connection attempt
+     */
+    private suspend fun attemptWebSocketConnection(url: URL): ConnectionAttemptResult {
+        var webSocket: WebSocket? = null
+        try {
+            Timber.d("Creating WebSocket connection")
+            webSocket = okHttpClient.newWebSocket(
+                Request.Builder().url(url.toWebSocketURL())
+                    .header(USER_AGENT, USER_AGENT_STRING)
+                    .build(),
+                this@WebSocketCoreImpl,
+            )
+
+            val accessToken = serverManager.authenticationRepository(serverId).retrieveAccessToken()
+            val result = webSocket.send(
+                kotlinJsonMapper.encodeToString(
+                    mapOf(
+                        "type" to "auth",
+                        "access_token" to accessToken,
+                    ),
+                ),
+            )
+            if (!result) {
+                Timber.e("Unable to send auth message")
+                webSocket.cancel() // Won't do anything in handleClosingSocket since holder is null
+                return ConnectionAttemptResult.Failed(socketCreated = true)
+            }
+            return ConnectionAttemptResult.Success(webSocket)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Timber.e(e, "Unable to connect")
+            // Set state directly if no WebSocket was created (socket creation failed)
+            // Otherwise handleClosingSocket will be called via onFailure when cancel() is called
+            if (webSocket == null) {
+                connectionState = WebSocketState.ClosedOther
+            }
+            webSocket?.cancel()
+            return ConnectionAttemptResult.Failed(socketCreated = webSocket != null)
+        }
+    }
+
+    /**
+     * Waits for authentication to complete and sets up the [ConnectionHolder].
+     * Also sends the supported_features message if the server supports it.
+     *
+     * @return true if authentication succeeded and holder was created, false otherwise
+     */
+    private suspend fun awaitAuthAndSetupConnectionHolder(
+        webSocket: WebSocket,
+        url: URL,
+        urlObserverJob: Job,
+    ): Boolean {
+        val result = withTimeoutOrNull(30.seconds) {
+            try {
+                val haVersion = authCompleted.await()
+
+                // Create the ConnectionHolder now that we have all the information
+                connectionHolder.set(
+                    ConnectionHolder(
+                        webSocket = webSocket,
+                        haVersion = haVersion,
+                        url = url,
+                        urlObserverJob = urlObserverJob,
+                    ),
+                )
+
+                if (haVersion?.isAtLeast(2022, 9) == true) {
+                    sendSupportedFeatures(webSocket)
+                }
+
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Timber.e(e, "Unable to authenticate")
+                webSocket.cancel() // This is going to set the state to close other
+                connectionHolder.set(null)
+                false
+            }
+        }
+
+        if (result == null) {
+            // Timeout occurred
+            webSocket.cancel() // This is going to set the state to close other
+            connectionHolder.set(null)
+            return false
+        }
+
+        return result
+    }
+
+    private fun sendSupportedFeatures(webSocket: WebSocket) {
+        val supportedFeaturesMessage = mapOf(
+            "type" to "supported_features",
+            "id" to id.getAndIncrement(),
+            "features" to mapOf(
+                "coalesce_messages" to 1,
+            ),
+        )
+        Timber.d("Sending message ${supportedFeaturesMessage["id"]}: $supportedFeaturesMessage")
+        val result = webSocket.send(
+            kotlinJsonMapper.encodeToString(
+                MapAnySerializer,
+                supportedFeaturesMessage,
+            ),
+        )
+        if (!result) {
+            Timber.w("Unable to send supported features message")
+        }
+    }
+
+    override fun getConnectionState(): WebSocketState = connectionState
+
+    override suspend fun sendMessage(request: Map<String, Any?>): RawMessageSocketResponse? =
+        sendMessage(WebSocketRequest(request))
+
+    override suspend fun sendMessage(request: WebSocketRequest): RawMessageSocketResponse? {
+        return sendMessage(
+            Command.WithAnswer.Message(request),
+        )
+    }
+
+    private suspend fun sendMessage(command: Command.WithAnswer): RawMessageSocketResponse? {
+        if (!connect()) {
+            Timber.w("Unable to send message, not connected: ${sensitive { command.request.toString() }}")
+            return null
+        }
+
+        sendCommandChannel.send(command)
+
+        val id: Long
+        try {
+            id = command.sendCompleted.await()
+        } catch (e: HAWebSocketException) {
+            Timber.e(e, "Failed to send message ${sensitive { command.request.toString() }}")
+            return null
+        }
+
+        // Wait for response with timeout
+        val response = try {
+            withTimeoutOrNull(command.request.timeout) {
+                command.responseDeferred.await()
+            }
+        } catch (e: CancellationException) {
+            activeMessages.remove(id)
+            throw e
+        } catch (e: Exception) {
+            // Connection closed or other error while waiting for response
+            Timber.e(e, "Error waiting for response to message $id")
+            activeMessages.remove(id)
+            return null
+        }
+
+        if (response == null) {
+            activeMessages.remove(id)
+        }
+
+        return response
+    }
+
+    override suspend fun sendBytes(data: ByteArray): Boolean {
+        if (!connect()) {
+            Timber.w("Unable to send bytes, not connected")
+            return false
+        }
+
+        val command = Command.Bytes(data)
+
+        sendCommandChannel.send(command)
+
+        return try {
+            command.sendCompleted.await()
+        } catch (e: HAWebSocketException) {
+            Timber.e(e, "Failed to send bytes")
+            false
+        }
+    }
+
+    override suspend fun ping(): Boolean {
+        // Capture the connection this ping verifies, so a connection (re)established while
+        // waiting for the pong is never cancelled by mistake.
+        val holder = connectionHolder.get()
+        val response = sendMessage(mapOf("type" to "ping"))
+        if (response is PongSocketResponse) return true
+
+        if (holder != null && connectionHolder.get() === holder) {
+            // No pong on a connection that is believed to be established means the socket is
+            // half-open: the server went away without the TCP connection being reset, for
+            // example when it restarted and its address moved. OkHttp keeps buffering writes
+            // into such a socket without ever failing, so no close callback would fire on its
+            // own. Cancelling forces onFailure, which runs handleClosingSocket and lets the
+            // restore loop bring the connection and its subscriptions back.
+            Timber.w("No pong received on the established connection, cancelling it to trigger reconnection")
+            holder.webSocket.cancel()
+        }
+        return false
+    }
+
+    override suspend fun <T : Any> subscribeTo(
+        type: String,
+        data: Map<String, Any?>,
+        timeout: kotlin.time.Duration,
+    ): Flow<T>? {
+        val subscribeMessage = buildMap {
+            put("type", type)
+            putAll(data)
+        }
+
+        return eventSubscriptionMutex.withLock<Flow<T>?> {
+            ( // Check for existing subscription before creating a new one
+                findSubscription(subscribeMessage)?.second?.eventFlow
+                    ?: createSubscriptionFlow<T>(subscribeMessage, timeout)
+                ) as? Flow<T>
+        }
+    }
+
+    override fun shutdown() {
+        Timber.i("Shutting down websocket")
+        close(1001, "Session removed from app.")
+    }
+
+    // ----- WebSocketListener section
+
+    /**
+     * Checks if the given webSocket is stale (no longer the current connection).
+     * Callbacks from stale connections should be ignored to prevent acting on outdated state.
+     *
+     * Note: During connection establishment (before connectionHolder is set), callbacks are
+     * allowed through since connect() is managing the lifecycle.
+     */
+    private fun isStaleConnection(webSocket: WebSocket): Boolean {
+        val currentWebSocket = connectionHolder.get()?.webSocket ?: return false
+        // If no established connection yet, allow callbacks through (connect() handles them)
+        return currentWebSocket != webSocket
+    }
+
+    override fun onOpen(webSocket: WebSocket, response: Response) {
+        Timber.d("Websocket: onOpen")
+        if (isStaleConnection(webSocket)) {
+            Timber.w("Ignoring onOpen from stale connection")
+            return
+        }
+        connectionState = WebSocketState.Authenticating
+    }
+
+    @OptIn(DelicateCoroutinesApi::class)
+    override fun onMessage(webSocket: WebSocket, text: String) {
+        Timber.d("Websocket: onMessage (text: ${sensitive(text)})")
+        if (isStaleConnection(webSocket)) {
+            Timber.w("Ignoring onMessage from stale connection")
+            return
+        }
+        val jsonElement = kotlinJsonMapper.decodeFromString<JsonElement>(text)
+        val messages: List<SocketResponse> = if (jsonElement is JsonArray) {
+            jsonElement.map { kotlinJsonMapper.decodeFromJsonElement<SocketResponse>(it) }
+        } else {
+            listOf(kotlinJsonMapper.decodeFromJsonElement<SocketResponse>(jsonElement))
+        }
+
+        messages.forEach { message ->
+            Timber.d("Message id ${message.maybeId()} received")
+
+            // Handle auth messages directly on this thread to ensure connectionState is set synchronously
+            when (message) {
+                is AuthRequiredSocketResponse -> {
+                    Timber.d("Auth Requested")
+                    return@forEach
+                }
+
+                is AuthOkSocketResponse, is AuthInvalidSocketResponse -> {
+                    handleAuthComplete(message is AuthOkSocketResponse, message.haVersion)
+                    return@forEach
+                }
+
+                else -> Unit // handle in the queue
+            }
+
+            // Send other messages to the queue to ensure they are handled in order
+            val result = messageQueue.trySend(
+                wsScope.launch(start = CoroutineStart.LAZY) {
+                    when (message) {
+                        is EventSocketResponse -> handleEvent(message)
+                        is MessageSocketResponse, is PongSocketResponse -> handleMessage(message)
+                        is UnknownTypeSocketResponse -> Timber.w("Unknown message received: $message")
+                        // Auth messages already handled above
+                        is AuthRequiredSocketResponse, is AuthOkSocketResponse, is AuthInvalidSocketResponse -> Unit
+                    }
+                },
+            )
+
+            FailFast.failWhen(!result.isSuccess) {
+                "Failed to process message (ID: ${message.maybeId()}). " +
+                    "IsFailure? ${result.isFailure}. " +
+                    "Is wsScope active? ${wsScope.isActive}. " +
+                    "Queue status: isClosedForSend = ${messageQueue.isClosedForSend}. " +
+                    "Exception: ${result.exceptionOrNull()}"
+            }
+        }
+    }
+
+    override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+        Timber.d("Websocket: onMessage (bytes)")
+    }
+
+    override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+        Timber.d("Websocket: onClosing code: $code, reason: $reason")
+        if (isStaleConnection(webSocket)) {
+            Timber.w("Ignoring onClosing from stale connection")
+            return
+        }
+        handleClosingSocket()
+    }
+
+    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+        Timber.d("Websocket: onClosed")
+        if (isStaleConnection(webSocket)) {
+            Timber.w("Ignoring onClosed from stale connection")
+            return
+        }
+        handleClosingSocket()
+    }
+
+    override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+        Timber.e(t, "Websocket: onFailure")
+        if (isStaleConnection(webSocket)) {
+            Timber.w("Ignoring onFailure from stale connection")
+            return
+        }
+        if (authCompleted.isActive) {
+            authCompleted.completeExceptionally(t)
+        }
+        handleClosingSocket()
+    }
+
+    private suspend fun <T> createSubscriptionFlow(subscribeMessage: Map<String, Any?>, timeout: Duration): Flow<T>? {
+        val channel = Channel<T>(capacity = Channel.BUFFERED)
+        val flow = callbackFlow<T> {
+            launch { channel.consumeAsFlow().collect(::send) }
+            awaitClose {
+                wsScope.launch {
+                    eventSubscriptionMutex.withLock {
+                        findSubscription(subscribeMessage)?.let { (subscriptionId, subscription) ->
+                            Timber.d("Unsubscribing from ${sensitive { subscribeMessage.toString() }}")
+                            // Unsubscribe must happen before removing from activeMessages to ensure
+                            // the server acknowledges before we stop handling events for this subscription
+                            unsubscribeEvents(subscriptionId)
+                            activeMessages.remove(subscriptionId)
+                            // Drop any resubscription attempt still in flight for this subscription:
+                            // its acknowledgement must not resurrect the closed subscription, and the
+                            // server may already have accepted it, so its pending id is unsubscribed
+                            // rather than left to linger
+                            activeMessages.entries
+                                .filter { (it.value as? ActiveMessage.Reconnecting)?.original === subscription }
+                                .forEach {
+                                    unsubscribeEvents(it.key)
+                                    activeMessages.remove(it.key)
+                                }
+                        }
+                        channel.close()
+                    }
+                    if (activeMessages.isEmpty()) {
+                        Timber.i("No more subscriptions, closing connection.")
+                        close(1001, "Done listening to subscriptions.")
+                    } else {
+                        Timber.i("Still ${activeMessages.size} messages in the queue, not closing connection.")
+                    }
+                }
+            }
+        }.shareIn(backgroundScope, SharingStarted.WhileSubscribed(timeout.inWholeMilliseconds, 0))
+
+        val response = sendMessage(
+            Command.WithAnswer.Subscription(
+                request = WebSocketRequest(message = subscribeMessage),
+                eventFlow = flow as SharedFlow<Any>,
+                onEvent = channel as Channel<Any>,
+            ),
+        )
+        if (response == null || response.success != true) {
+            Timber.e("Unable to subscribe to ${sensitive { subscribeMessage.toString() }}")
+            findSubscription(subscribeMessage)?.let { (subscriptionId, _) -> activeMessages.remove(subscriptionId) }
+            return null
+        } else {
+            return flow
+        }
+    }
+
+    /**
+     * Finds the single [ActiveMessage.Subscription] entry and its ID matching [subscribeMessage].
+     *
+     * Resubscription attempts are tracked as [ActiveMessage.Reconnecting] and never match, so one
+     * logical subscription always has exactly one matching entry.
+     */
+    private fun findSubscription(subscribeMessage: Map<String, Any?>): Pair<Long, ActiveMessage.Subscription>? {
+        return activeMessages.firstNotNullOfOrNull { (id, message) ->
+            if (message is ActiveMessage.Subscription && message.request.message == subscribeMessage) {
+                id to message
+            } else {
+                null
+            }
+        }
+    }
+
+    private fun handleAuthComplete(successful: Boolean, haVersion: String?) {
+        val parsedVersion = haVersion?.let { HomeAssistantVersion.fromString(it) }
+        if (successful) {
+            connectionState = WebSocketState.Active
+            authCompleted.complete(parsedVersion)
+        } else {
+            connectionState = WebSocketState.ClosedAuth
+            pendingCloseReason = WebSocketState.Closed.Reason.AUTH
+            authCompleted.completeExceptionally(AuthorizationException())
+        }
+    }
+
+    private fun handleMessage(response: RawMessageSocketResponse) {
+        val id = checkNotNull(response.id) { "Response without ID" }
+        activeMessages[id]?.let { request ->
+            // Complete the deferred - this is safe to call multiple times (idempotent)
+            val completed = request.responseDeferred.complete(response)
+            if (!completed) {
+                Timber.w("Response deferred was already completed for ${response.id}")
+            }
+            // Simple messages are done once answered; Subscription entries keep receiving
+            // events and Reconnecting entries are resolved by the restore loop once it
+            // observes this answer
+            if (request is ActiveMessage.Simple) {
+                activeMessages.remove(id)
+            }
+        } ?: run { Timber.w("Response for message not in activeMessage id($id) skipping") }
+    }
+
+    /**
+     * Resolves the subscription events for [subscriptionId] belong to, or `null` when the
+     * subscription is already gone.
+     */
+    private fun subscriptionForEvent(subscriptionId: Long?): ActiveMessage.Subscription? =
+        when (val message = activeMessages[subscriptionId]) {
+            // An event can arrive for the new id before the resubscription acknowledgement
+            // has been processed, deliver it to the original subscription's flow
+            is ActiveMessage.Reconnecting -> message.original
+            is ActiveMessage.Subscription -> message
+            is ActiveMessage.Simple -> {
+                FailFast.fail { "Event $subscriptionId associated to a Simple message" }
+                null
+            }
+            // A message can still arrive after unsubscribe, like run-end in Assist pipeline
+            null -> null
+        }
+
+    private suspend fun handleEvent(response: EventSocketResponse) {
+        // TODO https://github.com/home-assistant/android/issues/5271
+        val subscriptionId = response.id
+        val activeMessage = subscriptionForEvent(subscriptionId)
+
+        if (activeMessage == null) {
+            Timber.d("Received event for unknown subscription id= $subscriptionId, unsubscribing")
+            subscriptionId?.let {
+                unsubscribeEvents(subscriptionId)
+            }
+            return
+        }
+        val subscriptionType = activeMessage.request.message["type"]
+        val eventResponseType = (response.event as? JsonObject)?.get("event_type")
+
+        val message: Any =
+            if ((response.event as? JsonObject)?.contains("hass_confirm_id") == true) {
+                kotlinJsonMapper.decodeFromJsonElement<Map<String, Any?>>(MapAnySerializer, response.event)
+            } else if (subscriptionType == SUBSCRIBE_TYPE_SUBSCRIBE_ENTITIES) {
+                if (response.event != null) {
+                    kotlinJsonMapper.decodeFromJsonElement<CompressedStateChangedEvent>(response.event)
+                } else {
+                    Timber.w("Received no event for entity subscription, skipping")
+                    return
+                }
+            } else if (subscriptionType == SUBSCRIBE_TYPE_RENDER_TEMPLATE) {
+                if (response.event != null) {
+                    kotlinJsonMapper.decodeFromJsonElement<TemplateUpdatedEvent>(response.event)
+                } else {
+                    Timber.w("Received no event for template subscription, skipping")
+                    return
+                }
+            } else if (subscriptionType == SUBSCRIBE_TYPE_SUBSCRIBE_TRIGGER) {
+                val trigger = ((response.event as? JsonObject)?.get("variables") as? JsonObject)?.get("trigger")
+                if (trigger != null) {
+                    kotlinJsonMapper.decodeFromJsonElement<TriggerEvent>(trigger)
+                } else {
+                    Timber.w("Received no trigger value for trigger subscription, skipping")
+                    return
+                }
+            } else if (subscriptionType == SUBSCRIBE_TYPE_ASSIST_PIPELINE_RUN) {
+                val eventType = (response.event as? JsonObject)?.get("type")
+                if ((eventType as? JsonPrimitive)?.isString == true) {
+                    val eventDataMap = response.event["data"]
+                    if (eventDataMap == null) {
+                        Timber.w("Received Assist pipeline event without data, skipping")
+                        return
+                    }
+                    val eventData = when (eventType.jsonPrimitive.content) {
+                        AssistPipelineEventType.RUN_START ->
+                            kotlinJsonMapper.decodeFromJsonElement<AssistPipelineRunStart>(eventDataMap)
+
+                        AssistPipelineEventType.STT_END ->
+                            kotlinJsonMapper.decodeFromJsonElement<AssistPipelineSttEnd>(eventDataMap)
+
+                        AssistPipelineEventType.INTENT_START ->
+                            kotlinJsonMapper.decodeFromJsonElement<AssistPipelineIntentStart>(eventDataMap)
+
+                        AssistPipelineEventType.INTENT_PROGRESS ->
+                            kotlinJsonMapper.decodeFromJsonElement<AssistPipelineIntentProgress>(eventDataMap)
+
+                        AssistPipelineEventType.INTENT_END ->
+                            kotlinJsonMapper.decodeFromJsonElement<AssistPipelineIntentEnd>(eventDataMap)
+
+                        AssistPipelineEventType.TTS_END ->
+                            kotlinJsonMapper.decodeFromJsonElement<AssistPipelineTtsEnd>(eventDataMap)
+
+                        AssistPipelineEventType.ERROR ->
+                            kotlinJsonMapper.decodeFromJsonElement<AssistPipelineError>(eventDataMap)
+
+                        else -> {
+                            Timber.d("Unknown event type ignoring. received data = \n$response")
+                            null
+                        }
+                    }
+                    AssistPipelineEvent(eventType.jsonPrimitive.content, eventData)
+                } else {
+                    Timber.w("Received Assist pipeline event without type, skipping")
+                    return
+                }
+            } else if (eventResponseType != null && (eventResponseType as? JsonPrimitive)?.isString == true) {
+                when (eventResponseType.content) {
+                    EVENT_STATE_CHANGED -> {
+                        kotlinJsonMapper.decodeFromJsonElement<EventResponse<StateChangedEvent>>(
+                            response.event,
+                        ).data
+                    }
+
+                    EVENT_AREA_REGISTRY_UPDATED -> {
+                        kotlinJsonMapper.decodeFromJsonElement<EventResponse<AreaRegistryUpdatedEvent>>(
+                            response.event,
+                        ).data
+                    }
+
+                    EVENT_DEVICE_REGISTRY_UPDATED -> {
+                        kotlinJsonMapper.decodeFromJsonElement<EventResponse<DeviceRegistryUpdatedEvent>>(
+                            response.event,
+                        ).data
+                    }
+
+                    EVENT_ENTITY_REGISTRY_UPDATED -> {
+                        kotlinJsonMapper.decodeFromJsonElement<EventResponse<EntityRegistryUpdatedEvent>>(
+                            response.event,
+                        ).data
+                    }
+
+                    else -> {
+                        Timber.d("Unknown event type received ${response.event}")
+                        return
+                    }
+                }
+            } else {
+                Timber.d("Unknown event for subscription received, skipping")
+                return
+            }
+
+        try {
+            activeMessage.onEvent.send(message)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Timber.e(e, "Unable to send event message to channel")
+        }
+    }
+
+    private suspend fun unsubscribeEvents(id: Long) {
+        sendMessage(
+            mapOf(
+                "type" to "unsubscribe_events",
+                "subscription" to id,
+            ),
+        )
+    }
+
+    /**
+     * Clean up deferred and messages when the socket is being closed.
+     */
+    @GuardedBy("connectedMutex")
+    private fun cleanupClosingSocket() {
+        //  Complete connected and pending connect deferred
+        pendingConnectDeferred?.complete(false)
+        pendingConnectDeferred = null
+        authCompleted.completeExceptionally(IOException("Connection closed"))
+        authCompleted = CompletableDeferred()
+
+        // Complete all pending simple messages and in-flight resubscription attempts with an
+        // error; the original subscriptions the attempts point to stay tracked and are restored
+        // once a connection is established again
+        activeMessages
+            .filterValues { it is ActiveMessage.Simple || it is ActiveMessage.Reconnecting }
+            .forEach { (key, activeMessage) ->
+                val completed =
+                    activeMessage.responseDeferred.completeExceptionally(IOException("Connection closed"))
+                if (!completed) {
+                    Timber.w("Response deferred was already completed, skipping IOException")
+                }
+                activeMessages.remove(key)
+            }
+    }
+
+    private fun handleClosingSocket() {
+        wsScope.launch {
+            connectedMutex.withLock {
+                val previousState = connectionState
+                val closeReason = pendingCloseReason ?: WebSocketState.Closed.Reason.OTHER
+                val wasActive = previousState == WebSocketState.Active
+                pendingCloseReason = null
+
+                when (previousState) {
+                    is WebSocketState.Closed -> {
+                        // Already closed, preserve existing reason
+                    }
+
+                    WebSocketState.Authenticating,
+                    WebSocketState.Active, WebSocketState.Initial,
+                    -> {
+                        connectionState = WebSocketState.Closed(closeReason)
+                    }
+                }
+
+                // If null, either connect() is managing the lifecycle, close() already cleaned
+                // up, or another callback of the same closing already handled it
+                val holder = connectionHolder.getAndSet(null) ?: return@launch
+                // Cancel URL observer - connect() will recreate it if needed
+                holder.urlObserverJob.cancel()
+
+                cleanupClosingSocket()
+                val hasSubscriptions = activeMessages.any { it.value is ActiveMessage.Subscription }
+                val shouldAttemptReconnect = hasSubscriptions && wasActive
+
+                if (shouldAttemptReconnect && wsScope.isActive) {
+                    // A new closing takes over the reconnection, replacing the job under the
+                    // lock so concurrent closings cannot start two loops. Once a connection is
+                    // established, restoreLeftoverSubscriptions cancels this job in turn and
+                    // replaces it with the restoration
+                    reconnectJob?.cancel()
+                    reconnectJob = wsScope.launch {
+                        // Delay before reconnect unless URL changed
+                        if (closeReason != WebSocketState.Closed.Reason.CHANGED_URL) {
+                            delay(DELAY_BEFORE_RECONNECT)
+                        }
+                        reconnectForSubscriptions()
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Re-establishes the connection with capped backoff while subscriptions are still tracked.
+     */
+    private suspend fun reconnectForSubscriptions() {
+        var retryDelay = DELAY_BEFORE_RECONNECT
+        while (activeMessages.any { it.value is ActiveMessage.Subscription }) {
+            if (connect()) return
+            if (getConnectionState() == WebSocketState.ClosedAuth) {
+                Timber.e("Authentication failed, not retrying to reconnect for active subscriptions")
+                return
+            }
+            Timber.w("Unable to reconnect, retrying in $retryDelay to restore active subscriptions")
+            // Back off so a long outage is not hammered; a subscription is never abandoned
+            // while its collector is still listening
+            delay(retryDelay)
+            retryDelay = (retryDelay * 2).coerceAtMost(MAX_DELAY_BEFORE_RECONNECT)
+        }
+    }
+
+    /**
+     * Starts the restoration of any subscription still tracked when a connection is established:
+     * a fresh socket has no registrations, so everything tracked comes from a previous connection.
+     * Must run while [connectedMutex] is held, before the pending connect completes; the
+     * restoration is launched since running it inline would deadlock on the mutex.
+     */
+    @GuardedBy("connectedMutex")
+    private fun restoreLeftoverSubscriptions() {
+        val leftover = activeMessages.filterValues { it is ActiveMessage.Subscription }.keys
+        if (leftover.isEmpty() || !wsScope.isActive) return
+        // A recovery job still alive was working toward or against a connection that this
+        // establishment replaces: a reconnection loop has fulfilled its purpose, a restoration
+        // targeted the closed connection and is superseded by the fresh snapshot
+        reconnectJob?.cancel()
+        Timber.i("Connection established with ${leftover.size} subscriptions to restore")
+        reconnectJob = wsScope.launch {
+            restoreSubscriptions(leftover)
+        }
+    }
+
+    /**
+     * Restores [subscriptionsToRestore] (ids snapshotted under [connectedMutex] when the
+     * connection was established) on the current connection, retrying with capped backoff while
+     * the server keeps rejecting some of them. Stops once the connection is lost: the closing
+     * path reconnects and a new restoration starts with a fresh snapshot.
+     */
+    private suspend fun restoreSubscriptions(subscriptionsToRestore: Set<Long>) {
+        // Subscriptions closed since the snapshot was taken no longer need to be restored
+        var toRestore: Set<Long> =
+            subscriptionsToRestore.filterTo(mutableSetOf()) { activeMessages[it] is ActiveMessage.Subscription }
+        var retryDelay = DELAY_BEFORE_RECONNECT
+        while (toRestore.isNotEmpty()) {
+            if (getConnectionState() != WebSocketState.Active) return
+            val unrestored = resubscribeActiveSubscriptions(toRestore)
+            if (unrestored.isEmpty()) return
+            if (unrestored.size < toRestore.size) {
+                retryDelay = DELAY_BEFORE_RECONNECT
+            }
+            toRestore = unrestored
+            Timber.w("${toRestore.size} subscriptions not restored, retrying in $retryDelay")
+            delay(retryDelay)
+            retryDelay = (retryDelay * 2).coerceAtMost(MAX_DELAY_BEFORE_RECONNECT)
+            // Subscriptions closed while waiting no longer need to be restored
+            toRestore = toRestore.filterTo(mutableSetOf()) { activeMessages[it] is ActiveMessage.Subscription }
+        }
+    }
+
+    /**
+     * Resubscribes [oldIds] on the (re)established connection. Each attempt is tracked as an
+     * [ActiveMessage.Reconnecting] entry under the id the server will use, while the original
+     * subscription stays under its old id until the attempt is acknowledged and promoted.
+     *
+     * A subscription the server actively rejects is kept and retried by the caller with its
+     * capped backoff — silently abandoning it would leave the collector of its flow waiting for
+     * events that can never arrive. An attempt that receives no answer leaves the server state
+     * ambiguous (the subscribe may have been accepted with the answer lost), so the socket is
+     * cancelled and restoration resumes on a clean connection.
+     *
+     * @return the ids of the subscriptions that could not be restored and are kept for a retry
+     */
+    private suspend fun resubscribeActiveSubscriptions(oldIds: Set<Long>): Set<Long> {
+        Timber.d("Resubscribing to active subscriptions...")
+        val failed = mutableSetOf<Long>()
+        val remaining = oldIds.toMutableList()
+        while (remaining.isNotEmpty()) {
+            val oldId = remaining.removeAt(0)
+            val original = activeMessages[oldId] as? ActiveMessage.Subscription ?: continue
+
+            // Capture the connection this attempt is sent on, so a connection (re)established
+            // while waiting for the answer is never cancelled by mistake.
+            val attemptHolder = connectionHolder.get()
+            val response = sendMessage(Command.WithAnswer.Resubscription(original))
+            when {
+                response == null -> {
+                    // No answer: the attempt entry is already dropped by sendMessage, but the
+                    // server may have accepted the subscribe with the answer lost. Cancel the
+                    // socket the attempt went out on (never a replacement established while
+                    // waiting) so the retry happens on a clean connection where no ambiguous
+                    // acceptance can linger.
+                    Timber.e(
+                        "No answer re-registering subscription with ${sensitive { original.request.toString() }}," +
+                            " restoring on a clean connection",
+                    )
+                    failed += oldId
+                    failed += remaining
+                    if (attemptHolder != null && connectionHolder.get() === attemptHolder) {
+                        attemptHolder.webSocket.cancel()
+                    }
+                    return failed
+                }
+
+                response.success != true -> {
+                    response.id?.let { activeMessages.remove(it) }
+                    failed += oldId
+                    Timber.e(
+                        "Subscription ${sensitive { original.request.toString() }} rejected, retrying with backoff",
+                    )
+                }
+
+                else -> {
+                    val newId = checkNotNull(response.id) { "Response without ID" }
+                    eventSubscriptionMutex.withLock {
+                        if (activeMessages.remove(oldId, original)) {
+                            // Use the server's new id for the original subscription, flow and channel
+                            activeMessages[newId] = original
+                        } else {
+                            // Subscription was stopped while attempt was in flight, unsubscribe
+                            activeMessages.remove(newId)
+                            unsubscribeEvents(newId)
+                        }
+                    }
+                }
+            }
+        }
+        return failed
+    }
+
+    private fun URL.toWebSocketURL(): String {
+        return toString()
+            .replace("https://", "wss://")
+            .replace("http://", "ws://")
+            .plus("api/websocket")
+    }
+}
+
+/**
+ * Holds connection-related state for a fully established connection.
+ */
+private data class ConnectionHolder(
+    val webSocket: WebSocket,
+    val haVersion: HomeAssistantVersion?,
+    val url: URL,
+    val urlObserverJob: Job,
+)
+
+/**
+ * Result of attempting to create a WebSocket connection.
+ */
+private sealed interface ConnectionAttemptResult {
+    /** WebSocket created and auth message sent successfully */
+    data class Success(val webSocket: WebSocket) : ConnectionAttemptResult
+
+    /** Failed to create WebSocket or send auth */
+    data class Failed(val socketCreated: Boolean) : ConnectionAttemptResult
+}
+
+/**
+ * Represents an active WebSocket message that has been sent and is awaiting a response.
+ *
+ * Stored in the active messages map to correlate incoming responses with their original requests.
+ */
+@VisibleForTesting
+internal sealed interface ActiveMessage {
+    /** Completes when the server sends a response for this message */
+    val responseDeferred: CompletableDeferred<RawMessageSocketResponse>
+
+    /**
+     * A one-shot message.
+     */
+    class Simple(override val responseDeferred: CompletableDeferred<RawMessageSocketResponse>) : ActiveMessage
+
+    /**
+     * A subscription that receive multiple events over time.
+     *
+     * @param responseDeferred Completes with the initial subscription confirmation response
+     * @param eventFlow The shared flow that emits events to external subscribers
+     * @param onEvent The channel used to send events into the flow
+     * @param request The original request, retained for resubscription after reconnection
+     */
+    class Subscription(
+        override val responseDeferred: CompletableDeferred<RawMessageSocketResponse>,
+        val eventFlow: SharedFlow<Any>,
+        val onEvent: Channel<Any>,
+        val request: WebSocketRequest,
+    ) : ActiveMessage
+
+    /**
+     * A resubscription attempt in flight after a reconnection.
+     *
+     * @param responseDeferred Completes with the subscription confirmation response
+     * @param original The subscription being restored
+     */
+    class Reconnecting(
+        override val responseDeferred: CompletableDeferred<RawMessageSocketResponse>,
+        val original: Subscription,
+    ) : ActiveMessage
+}
+
+/**
+ * Represents a command to be sent through the send command channel for serialized WebSocket sending.
+ *
+ * @param T The type of result returned when the send operation completes
+ */
+private sealed interface Command<T> {
+    /** Completes when the send operation finishes, with the result of type [T] */
+    val sendCompleted: CompletableDeferred<T>
+
+    /**
+     * A command that sends a message and expects a response from the server.
+     *
+     * @param request The request containing the message to send and timeout configuration
+     * @property sendCompleted Completes with the assigned message ID when sent successfully,
+     *                         or completes exceptionally with [HAWebSocketException] on failure
+     * @property responseDeferred Completes when the server responds to this message
+     */
+    sealed class WithAnswer(val request: WebSocketRequest) : Command<Long> {
+        override val sendCompleted: CompletableDeferred<Long> = CompletableDeferred()
+        val responseDeferred: CompletableDeferred<RawMessageSocketResponse> = CompletableDeferred()
+
+        /** Creates an [ActiveMessage] to track this request while awaiting a response */
+        abstract fun toActiveMessage(): ActiveMessage
+
+        /** A simple one-shot message that expects a single response */
+        class Message(request: WebSocketRequest) : WithAnswer(request) {
+            override fun toActiveMessage(): ActiveMessage {
+                return ActiveMessage.Simple(responseDeferred)
+            }
+        }
+
+        /**
+         * A subscription message that receives multiple events over time.
+         *
+         * @param eventFlow The shared flow that emits events to subscribers
+         * @param onEvent The channel used internally to send events to the flow
+         */
+        class Subscription(request: WebSocketRequest, val eventFlow: SharedFlow<Any>, val onEvent: Channel<Any>) :
+            WithAnswer(request) {
+
+            override fun toActiveMessage(): ActiveMessage {
+                return ActiveMessage.Subscription(
+                    responseDeferred,
+                    eventFlow,
+                    onEvent,
+                    request,
+                )
+            }
+        }
+
+        /**
+         * A resubscription attempt for [original] after a reconnection.
+         *
+         * When answered successfully, [original] should be tracked instead of this entire message.
+         */
+        class Resubscription(private val original: ActiveMessage.Subscription) : WithAnswer(original.request) {
+
+            override fun toActiveMessage(): ActiveMessage {
+                return ActiveMessage.Reconnecting(responseDeferred, original)
+            }
+        }
+    }
+
+    /**
+     * A command that sends raw bytes without expecting a typed response.
+     * Used for binary data like audio streams.
+     *
+     * @param data The raw bytes to send
+     * @property sendCompleted Completes with `true` if sent successfully, `false` otherwise
+     */
+    class Bytes(val data: ByteArray) : Command<Boolean> {
+        override val sendCompleted: CompletableDeferred<Boolean> = CompletableDeferred()
+    }
+}

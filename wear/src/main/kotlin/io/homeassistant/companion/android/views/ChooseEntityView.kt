@@ -1,0 +1,185 @@
+package io.homeassistant.companion.android.views
+
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.wear.compose.foundation.lazy.items
+import androidx.wear.compose.material3.Button
+import androidx.wear.compose.material3.ButtonDefaults
+import androidx.wear.compose.material3.Text
+import androidx.wear.tooling.preview.devices.WearDevices
+import io.github.timoptr.mdiicons.Mdi
+import io.github.timoptr.mdiicons.generated.Delete
+import io.github.timoptr.mdiicons.rememberImageVector
+import io.homeassistant.companion.android.common.R as commonR
+import io.homeassistant.companion.android.common.data.integration.display.EntityDisplay
+import io.homeassistant.companion.android.common.data.integration.display.EntityDisplayWithoutContext
+import io.homeassistant.companion.android.common.util.capitalize
+import io.homeassistant.companion.android.common.util.mdiName
+import io.homeassistant.companion.android.data.SimplifiedEntity
+import io.homeassistant.companion.android.theme.WearAppTheme
+import io.homeassistant.companion.android.theme.getFilledTonalButtonColors
+import io.homeassistant.companion.android.util.playPreviewEntityScene1
+import io.homeassistant.companion.android.util.playPreviewEntityScene2
+import io.homeassistant.companion.android.util.stringForDomain
+import java.util.Locale
+
+@Composable
+fun ChooseEntityView(
+    entitiesByDomainOrder: List<String>,
+    entitiesByDomain: Map<String, List<EntityDisplay>>,
+    favoriteEntityIds: List<String>,
+    onNoneClicked: () -> Unit,
+    onEntitySelected: (entity: SimplifiedEntity) -> Unit,
+    allowNone: Boolean = true,
+) {
+    // Remember expanded state of each header
+    val expandedStates = rememberExpandedStates(entitiesByDomainOrder)
+    var expandedFavorites: Boolean by rememberSaveable { mutableStateOf(false) }
+
+    WearAppTheme {
+        ThemeLazyColumn {
+            item {
+                ListHeader(id = commonR.string.choose_entity)
+            }
+            if (allowNone) {
+                item {
+                    Button(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        icon = { Image(imageVector = Mdi.Delete.rememberImageVector(), contentDescription = null) },
+                        label = { Text(stringResource(id = commonR.string.none)) },
+                        onClick = onNoneClicked,
+                        colors = ButtonDefaults.buttonColors(
+                            contentColor = Color.Black,
+                        ),
+                    )
+                }
+            }
+
+            if (favoriteEntityIds.isNotEmpty()) {
+                item {
+                    ExpandableListHeader(
+                        string = stringResource(commonR.string.favorites),
+                        expanded = expandedFavorites,
+                        onExpandChanged = { expandedFavorites = it },
+                    )
+                }
+                if (expandedFavorites) {
+                    val allEntities = entitiesByDomain.flatMap { (_, values) -> values }
+                    items(favoriteEntityIds.size) { index ->
+                        val favoriteEntityID = favoriteEntityIds[index].split(",")[0]
+                        allEntities
+                            .firstOrNull { it.entityId == favoriteEntityID }
+                            ?.let {
+                                ChooseEntityChip(
+                                    entity = it,
+                                    onEntitySelected = onEntitySelected,
+                                )
+                            }
+                    }
+                }
+            }
+
+            for (domain in entitiesByDomainOrder) {
+                val entities = entitiesByDomain[domain]
+                if (!entities.isNullOrEmpty()) {
+                    item {
+                        ExpandableListHeader(
+                            string = stringForDomain(domain, LocalContext.current)
+                                ?: domain.replace('_', ' ').capitalize(Locale.getDefault()),
+                            key = domain,
+                            expandedStates = expandedStates,
+                        )
+                    }
+                    if (expandedStates[domain] == true) {
+                        items(entities, key = { it.entityId }) { entity ->
+                            ChooseEntityChip(
+                                entity = entity,
+                                onEntitySelected = onEntitySelected,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChooseEntityChip(entity: EntityDisplay, onEntitySelected: (entity: SimplifiedEntity) -> Unit) {
+    Button(
+        modifier = Modifier
+            .fillMaxWidth(),
+        icon = {
+            Image(
+                imageVector = entity.icon.rememberImageVector(),
+                contentDescription = null,
+                colorFilter = ColorFilter.tint(Color.White),
+            )
+        },
+        label = {
+            Text(
+                text = entity.name,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        onClick = {
+            onEntitySelected(
+                SimplifiedEntity(
+                    entity.entityId,
+                    entity.name,
+                    entity.statelessIcon.mdiName,
+                ),
+            )
+        },
+        colors = getFilledTonalButtonColors(),
+    )
+}
+
+@Preview(device = WearDevices.LARGE_ROUND)
+@Composable
+fun ChooseEntityViewEmptyPreview() {
+    ChooseEntityView(
+        entitiesByDomainOrder = emptyList(),
+        entitiesByDomain = emptyMap(),
+        favoriteEntityIds = emptyList(),
+        onNoneClicked = {},
+        onEntitySelected = {},
+        allowNone = true,
+    )
+}
+
+@Preview(device = WearDevices.LARGE_ROUND)
+@Composable
+fun ChooseEntityViewWithDataPreview() {
+    ChooseEntityView(
+        entitiesByDomainOrder = listOf(
+            playPreviewEntityScene1.entityId,
+            playPreviewEntityScene2.entityId,
+        ),
+        entitiesByDomain = mapOf(
+            playPreviewEntityScene1.entityId to listOf(EntityDisplayWithoutContext(playPreviewEntityScene1)),
+            playPreviewEntityScene2.entityId to listOf(EntityDisplayWithoutContext(playPreviewEntityScene2)),
+        ),
+        favoriteEntityIds = listOf(playPreviewEntityScene1.entityId),
+        onNoneClicked = {},
+        onEntitySelected = {},
+        allowNone = false,
+    )
+}

@@ -1,0 +1,104 @@
+package io.homeassistant.companion.android.util.compose
+
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.ContentAlpha
+import androidx.compose.material.Icon
+import androidx.compose.material.IconButton
+import androidx.compose.material.LocalContentAlpha
+import androidx.compose.material.LocalContentColor
+import androidx.compose.material.MaterialTheme
+import androidx.compose.material.Surface
+import androidx.compose.material.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import io.github.timoptr.mdiicons.Mdi
+import io.github.timoptr.mdiicons.generated.Close
+import io.github.timoptr.mdiicons.generated.DragHorizontalVariant
+import io.github.timoptr.mdiicons.generated.Plus
+import io.github.timoptr.mdiicons.rememberImageVector
+import io.homeassistant.companion.android.common.R
+import io.homeassistant.companion.android.common.data.integration.display.EntityDisplay
+import io.homeassistant.companion.android.common.data.integration.display.EntityDisplayWithContext
+import sh.calvin.reorderable.ReorderableCollectionItemScope
+
+/**
+ * A row displaying a favorite entity using the same display model as the entity picker:
+ * resolved icon and name with the area/device context as subtitle, falling back to the
+ * entity id when no metadata is available.
+ */
+@Composable
+fun ReorderableCollectionItemScope.FavoriteEntityRow(
+    entity: EntityDisplay,
+    onClick: () -> Unit,
+    checked: Boolean,
+    modifier: Modifier = Modifier,
+    draggable: Boolean = false,
+    isDragging: Boolean = false,
+) {
+    val surfaceElevation = animateDpAsState(targetValue = if (isDragging) 8.dp else 0.dp)
+    var rowModifier = Modifier.fillMaxWidth().heightIn(min = 72.dp)
+    if (draggable) {
+        rowModifier = rowModifier.longPressDraggableHandle()
+    }
+    Surface(
+        elevation = surfaceElevation.value,
+        modifier = modifier,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = rowModifier,
+        ) {
+            Image(
+                imageVector = entity.icon.rememberImageVector(),
+                contentDescription = null,
+                colorFilter = ColorFilter.tint(LocalContentColor.current),
+                modifier = Modifier.padding(start = 16.dp).size(24.dp),
+            )
+            Column(
+                modifier = Modifier.weight(1f).padding(start = 16.dp),
+            ) {
+                Text(text = entity.name, style = MaterialTheme.typography.body1)
+                CompositionLocalProvider(LocalContentAlpha provides ContentAlpha.medium) {
+                    Text(
+                        text =
+                        (entity as? EntityDisplayWithContext)?.subtitle()
+                            ?: entity.entityId,
+                        style = MaterialTheme.typography.body2,
+                    )
+                }
+            }
+            IconButton(onClick = onClick) {
+                Icon(
+                    imageVector = if (checked) Mdi.Close.rememberImageVector() else Mdi.Plus.rememberImageVector(),
+                    contentDescription = stringResource(if (checked) R.string.delete else R.string.add_favorite),
+                )
+            }
+            if (draggable) {
+                CompositionLocalProvider(LocalContentAlpha provides ContentAlpha.medium) {
+                    Image(
+                        imageVector = Mdi.DragHorizontalVariant.rememberImageVector(),
+                        contentDescription = stringResource(R.string.hold_to_reorder),
+                        colorFilter = ColorFilter.tint(LocalContentColor.current),
+                        modifier = Modifier
+                            .size(width = 40.dp, height = 24.dp)
+                            .padding(end = 16.dp)
+                            .alpha(LocalContentAlpha.current),
+                    )
+                }
+            }
+        }
+    }
+}

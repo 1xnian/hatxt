@@ -1,0 +1,40 @@
+name: Production Deploy
+
+on: # yamllint disable-line rule:truthy
+  workflow_dispatch:
+  release:
+    types: [released]
+
+env:
+  SUPPLY_UPLOAD_MAX_RETRIES: 5
+
+permissions:
+  contents: read
+
+jobs:
+  play_promote_production:
+    name: Play Publish Production
+    runs-on: ubuntu-latest
+    if: github.repository == 'home-assistant/android'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        with:
+          ruby-version: "4.0.7"
+          bundler-cache: false
+
+      - uses: $/.github/actions/inflate-secrets
+        name: Inflate Secrets
+        with:
+          keystore: ${{ secrets.ORIGINAL_KEYSTORE_FILE }}
+          google-services: ${{ secrets.GOOGLESERVICES }}
+          playstore-creds: ${{ secrets.PLAYSTORECREDS }}
+
+      - name: Install Fastlane dependencies
+        run: bundle install
+
+      - name: Promote Beta to Production Play Store
+        run: bundle exec fastlane promote_to_production

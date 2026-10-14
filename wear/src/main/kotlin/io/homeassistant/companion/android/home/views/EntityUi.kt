@@ -1,0 +1,158 @@
+package io.homeassistant.companion.android.home.views
+
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.wear.compose.material.Switch
+import androidx.wear.compose.material.ToggleChip
+import androidx.wear.compose.material3.Button
+import androidx.wear.compose.material3.LocalContentColor
+import androidx.wear.compose.material3.LocalTextStyle
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.Text
+import androidx.wear.tooling.preview.devices.WearDevices
+import io.github.timoptr.mdiicons.rememberImageVector
+import io.homeassistant.companion.android.common.data.integration.EntityExt
+import io.homeassistant.companion.android.common.data.integration.display.EntityDisplay
+import io.homeassistant.companion.android.common.data.integration.display.EntityDisplayWithoutContext
+import io.homeassistant.companion.android.common.util.STATE_UNAVAILABLE
+import io.homeassistant.companion.android.theme.getFilledTonalButtonColors
+import io.homeassistant.companion.android.theme.wearColorScheme
+import io.homeassistant.companion.android.util.WearToggleChip
+import io.homeassistant.companion.android.util.onEntityClickedFeedback
+import io.homeassistant.companion.android.util.previewEntity1
+import io.homeassistant.companion.android.util.previewEntity3
+import io.homeassistant.companion.android.util.previewEntity4
+
+@Composable
+fun EntityUi(
+    entity: EntityDisplay,
+    onEntityClicked: (String, String) -> Unit,
+    isHapticEnabled: Boolean,
+    isToastEnabled: Boolean,
+    onEntityLongPressed: (String) -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
+    val iconBitmap = entity.icon
+    val name = entity.name
+    val nameModifier = Modifier
+        .fillMaxWidth()
+        .pointerInput(Unit) {
+            detectTapGestures(
+                onTap = {
+                    onEntityClicked(entity.entityId, entity.rawState)
+                    onEntityClickedFeedback(
+                        isToastEnabled,
+                        isHapticEnabled,
+                        context,
+                        name,
+                        haptic,
+                    )
+                },
+                onLongPress = {
+                    onEntityLongPressed(entity.entityId)
+                },
+            )
+        }
+
+    if (entity.domain in EntityExt.DOMAINS_TOGGLE) {
+        val isChecked = entity.isActive
+        val isEnabled = entity.rawState != STATE_UNAVAILABLE
+        val colors = WearToggleChip.entityToggleChipBackgroundColors(entity, isChecked)
+        ToggleChip(
+            checked = isChecked,
+            onCheckedChange = {
+                onEntityClicked(entity.entityId, entity.rawState)
+                onEntityClickedFeedback(isToastEnabled, isHapticEnabled, context, name, haptic)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            appIcon = {
+                Image(
+                    imageVector = iconBitmap.rememberImageVector(),
+                    contentDescription = null,
+                    colorFilter = ColorFilter.tint(wearColorScheme.onSurface),
+                )
+            },
+            label = {
+                CompositionLocalProvider(
+                    LocalTextStyle provides MaterialTheme.typography.labelMedium,
+                    LocalContentColor provides colors.contentColor(enabled = isEnabled, checked = isChecked).value,
+                ) {
+                    Text(
+                        text = name,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = nameModifier,
+                    )
+                }
+            },
+            enabled = isEnabled,
+            toggleControl = { Switch(checked = isChecked) },
+            colors = colors,
+        )
+    } else {
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            icon = {
+                Image(
+                    imageVector = iconBitmap.rememberImageVector(),
+                    contentDescription = null,
+                    colorFilter = ColorFilter.tint(wearColorScheme.onSurface),
+                )
+            },
+            label = {
+                Text(
+                    text = name,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = nameModifier,
+                )
+            },
+            enabled = entity.rawState != STATE_UNAVAILABLE,
+            onClick = {
+                onEntityClicked(entity.entityId, entity.rawState)
+                onEntityClickedFeedback(isToastEnabled, isHapticEnabled, context, name, haptic)
+            },
+            colors = getFilledTonalButtonColors(),
+        )
+    }
+}
+
+@Preview(device = WearDevices.LARGE_ROUND)
+@Composable
+private fun PreviewEntityUI() {
+    Column {
+        EntityUi(
+            entity = EntityDisplayWithoutContext(previewEntity1),
+            onEntityClicked = { _, _ -> },
+            isHapticEnabled = true,
+            isToastEnabled = false,
+            onEntityLongPressed = { },
+        )
+        EntityUi(
+            entity = EntityDisplayWithoutContext(previewEntity3),
+            onEntityClicked = { _, _ -> },
+            isHapticEnabled = false,
+            isToastEnabled = true,
+            onEntityLongPressed = { },
+        )
+        EntityUi(
+            entity = EntityDisplayWithoutContext(previewEntity4),
+            onEntityClicked = { _, _ -> },
+            isHapticEnabled = false,
+            isToastEnabled = true,
+            onEntityLongPressed = { },
+        )
+    }
+}

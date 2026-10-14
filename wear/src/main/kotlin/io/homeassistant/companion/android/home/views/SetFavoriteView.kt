@@ -1,0 +1,95 @@
+package io.homeassistant.companion.android.home.views
+
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.wear.compose.foundation.lazy.items
+import androidx.wear.compose.material3.SwitchButton
+import androidx.wear.compose.material3.Text
+import io.github.timoptr.mdiicons.rememberImageVector
+import io.homeassistant.companion.android.common.R as commonR
+import io.homeassistant.companion.android.common.data.integration.display.EntityDisplay
+import io.homeassistant.companion.android.theme.WearAppTheme
+import io.homeassistant.companion.android.theme.getSwitchButtonColors
+import io.homeassistant.companion.android.theme.wearColorScheme
+import io.homeassistant.companion.android.views.ExpandableListHeader
+import io.homeassistant.companion.android.views.ListHeader
+import io.homeassistant.companion.android.views.ThemeLazyColumn
+import io.homeassistant.companion.android.views.rememberExpandedStates
+
+@Composable
+fun SetFavoritesView(
+    entitiesByDomain: Map<String, List<EntityDisplay>>,
+    domainNames: Map<String, String>,
+    favoriteEntityIds: List<String>,
+    onFavoriteSelected: (entityId: String, isSelected: Boolean) -> Unit,
+) {
+    // Remember expanded state of each header
+    val expandedStates = rememberExpandedStates(entitiesByDomain.keys)
+
+    WearAppTheme {
+        ThemeLazyColumn {
+            item {
+                ListHeader(id = commonR.string.set_favorite)
+            }
+            for ((domain, entities) in entitiesByDomain) {
+                if (entities.isNotEmpty()) {
+                    item {
+                        ExpandableListHeader(
+                            string = domainNames[domain] ?: domain,
+                            key = domain,
+                            expandedStates = expandedStates,
+                        )
+                    }
+                    if (expandedStates[domain] == true) {
+                        items(entities, key = { it.entityId }) { entity ->
+                            FavoriteToggleChip(
+                                entity = entity,
+                                favoriteEntityIds = favoriteEntityIds,
+                                onFavoriteSelected = onFavoriteSelected,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FavoriteToggleChip(
+    entity: EntityDisplay,
+    favoriteEntityIds: List<String>,
+    onFavoriteSelected: (entityId: String, isSelected: Boolean) -> Unit,
+) {
+    val iconBitmap = entity.icon
+
+    val entityId = entity.entityId
+    val checked = favoriteEntityIds.contains(entityId)
+    SwitchButton(
+        checked = checked,
+        onCheckedChange = {
+            onFavoriteSelected(entityId, it)
+        },
+        modifier = Modifier
+            .fillMaxWidth(),
+        icon = {
+            Image(
+                imageVector = iconBitmap.rememberImageVector(),
+                contentDescription = null,
+                colorFilter = ColorFilter.tint(wearColorScheme.onSurface),
+            )
+        },
+        label = {
+            Text(
+                text = entity.name,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        colors = getSwitchButtonColors(),
+    )
+}

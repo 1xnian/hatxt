@@ -1,0 +1,70 @@
+<manifest xmlns:tools="http://schemas.android.com/tools"
+    xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application tools:ignore="MissingApplicationIcon">
+
+        <activity android:name=".launch.LaunchActivity">
+            <meta-data android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity>
+
+        <activity android:name=".developer.DevPlaygroundActivity"
+            android:exported="true" />
+
+        <activity android:name=".developer.catalog.HAComposeCatalogActivity"
+            android:exported="false" />
+
+        <activity android:name=".developer.nfc.DebugNfcTagEmulatorActivity"
+            android:label="@string/debug_nfc_tag_emulator"
+            android:configChanges="orientation|screenSize"
+            android:exported="false" />
+
+        <!-- Disabled by default, DebugNfcTagEmulatorActivity enables it only while it is visible -->
+        <service
+            android:name=".developer.nfc.DebugNfcTagEmulatorService"
+            android:enabled="false"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/debug_nfc_tag_apduservice" />
+        </service>
+
+        <activity android:name=".developer.DemoExoPlayerActivity"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation"
+            tools:ignore="UnusedAttribute" />
+
+        <!--
+        Use a no-action-bar theme to prevent overlapping with the action bar during tests.
+        -->
+        <activity
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:name="io.homeassistant.companion.android.HiltComponentActivity"
+            />
+
+        <!--
+        Support for next.home-assistant.io links when developing (merged with non-next links in main manifest).
+        -->
+        <activity
+            android:name=".nfc.TagReaderActivity"
+            android:exported="true">
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="https"
+                    android:host="next.home-assistant.io"
+                    android:pathPrefix="/tag/" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

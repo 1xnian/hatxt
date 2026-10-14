@@ -1,0 +1,51 @@
+package io.homeassistant.companion.android.util.vehicle
+
+import android.app.ActivityOptions
+import android.content.Intent
+import android.graphics.Color
+import android.os.Build
+import android.view.Display
+import androidx.car.app.CarContext
+import androidx.car.app.model.Action
+import androidx.car.app.model.CarColor
+import androidx.car.app.model.CarIcon
+import androidx.core.graphics.drawable.IconCompat
+import io.github.timoptr.mdiicons.Mdi
+import io.github.timoptr.mdiicons.generated.Cog
+import io.github.timoptr.mdiicons.toBitmap
+import io.homeassistant.companion.android.common.util.SdkVersion
+import io.homeassistant.companion.android.settings.SettingsActivity
+import timber.log.Timber
+
+fun settingsAction(carContext: CarContext): Action {
+    return Action.Builder()
+        .setIcon(
+            CarIcon.Builder(
+                IconCompat.createWithBitmap(Mdi.Cog.toBitmap(carContext, 64, Color.WHITE)),
+            )
+                .setTint(CarColor.DEFAULT)
+                .build(),
+        )
+        .setOnClickListener {
+            startSettingsActivity(carContext)
+        }.build()
+}
+
+private fun startSettingsActivity(carContext: CarContext) {
+    Timber.d("Starting settings activity")
+    // The app must indicate the default display to be used to avoid a SecurityException on newer
+    // Android versions. See: https://developer.android.com/training/cars/platforms/releases#android-14
+    val options = if (SdkVersion.isAtLeast(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)) {
+        ActivityOptions.makeBasic()
+            .setLaunchDisplayId(Display.DEFAULT_DISPLAY)
+            .toBundle()
+    } else {
+        null
+    }
+    carContext.startActivity(
+        SettingsActivity.newInstance(carContext).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        },
+        options,
+    )
+}

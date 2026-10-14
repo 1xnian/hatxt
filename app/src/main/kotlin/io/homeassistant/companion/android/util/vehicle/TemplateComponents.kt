@@ -1,0 +1,228 @@
+package io.homeassistant.companion.android.util.vehicle
+
+import android.graphics.Color
+import android.os.Build
+import androidx.annotation.RequiresApi
+import androidx.annotation.StringRes
+import androidx.car.app.CarContext
+import androidx.car.app.ScreenManager
+import androidx.car.app.model.Action
+import androidx.car.app.model.CarColor
+import androidx.car.app.model.CarIcon
+import androidx.car.app.model.GridItem
+import androidx.car.app.model.Header
+import androidx.car.app.model.ItemList
+import androidx.core.graphics.drawable.IconCompat
+import androidx.lifecycle.LifecycleCoroutineScope
+import io.github.timoptr.mdiicons.Mdi
+import io.github.timoptr.mdiicons.generated.HomeSwitch
+import io.github.timoptr.mdiicons.generated.MapOutline
+import io.github.timoptr.mdiicons.generated.ViewList
+import io.github.timoptr.mdiicons.toBitmap
+import io.homeassistant.companion.android.common.R
+import io.homeassistant.companion.android.common.data.integration.Entity
+import io.homeassistant.companion.android.common.data.integration.IntegrationRepository
+import io.homeassistant.companion.android.common.data.integration.display.EntityDisplay
+import io.homeassistant.companion.android.common.data.integration.display.EntityDisplayState
+import io.homeassistant.companion.android.common.data.integration.getIcon
+import io.homeassistant.companion.android.common.data.prefs.PrefsRepository
+import io.homeassistant.companion.android.common.data.servers.ServerManager
+import io.homeassistant.companion.android.common.util.capitalize
+import io.homeassistant.companion.android.vehicle.ChangeServerScreen
+import io.homeassistant.companion.android.vehicle.DomainListScreen
+import io.homeassistant.companion.android.vehicle.EntityGridVehicleScreen
+import io.homeassistant.companion.android.vehicle.MapVehicleScreen
+import java.time.LocalDateTime
+import java.util.Locale
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import timber.log.Timber
+
+fun CarContext.getHeaderBuilder(@StringRes title: Int, action: Action = Action.BACK): Header.Builder =
+    getHeaderBuilder(getString(title), action)
+
+fun getHeaderBuilder(title: String, action: Action = Action.BACK): Header.Builder {
+    return Header.Builder().apply {
+        setTitle(title)
+        setStartHeaderAction(action)
+    }
+}
+
+fun getChangeServerGridItem(
+    carContext: CarContext,
+    lifecycleScope: LifecycleCoroutineScope,
+    screenManager: ScreenManager,
+    serverManager: ServerManager,
+    serverId: StateFlow<Int>,
+    onChangeServer: (Int) -> Unit,
+): GridItem.Builder {
+    return GridItem.Builder().apply {
+        setTitle(carContext.getString(R.string.aa_change_server))
+        setImage(
+            CarIcon.Builder(
+                IconCompat.createWithBitmap(Mdi.HomeSwitch.toBitmap(carContext, 64, Color.WHITE)),
+            )
+                .setTint(CarColor.DEFAULT)
+                .build(),
+        )
+        setOnClickListener {
+            lifecycleScope.launch {
+                Timber.i("Change server clicked")
+                screenManager.pushForResult(
+                    ChangeServerScreen(
+                        carContext,
+                        serverManager.servers(),
+                        serverId,
+                    ),
+                ) {
+                    it?.toString()?.toIntOrNull()?.let { serverId ->
+                        onChangeServer(serverId)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@RequiresApi(Build.VERSION_CODES.O)
+fun getNavigationGridItem(
+    carContext: CarContext,
+    screenManager: ScreenManager,
+    integrationRepositoryProvider: suspend () -> IntegrationRepository,
+    entitiesState: Flow<EntityDisplayState<EntityDisplay>>,
+): GridItem.Builder {
+    return GridItem.Builder().apply {
+        setTitle(carContext.getString(R.string.aa_navigation))
+        setImage(
+            CarIcon.Builder(
+                IconCompat.createWithBitmap(Mdi.MapOutline.toBitmap(carContext, 64, Color.WHITE)),
+            )
+                .setTint(CarColor.DEFAULT)
+                .build(),
+        )
+        setOnClickListener {
+            Timber.i("Navigation clicked")
+            screenManager.push(
+                MapVehicleScreen(
+                    carContext,
+                    integrationRepositoryProvider,
+                    entitiesState.map { state ->
+                        (state as? EntityDisplayState.Loaded)?.entities.orEmpty()
+                            .filter { it.domain in MAP_DOMAINS && !it.isHidden }
+                    },
+                ),
+            )
+        }
+    }
+}
+
+@RequiresApi(Build.VERSION_CODES.O)
+fun getDomainList(
+    domains: MutableSet<String>,
+    carContext: CarContext,
+    screenManager: ScreenManager,
+    serverManager: ServerManager,
+    serverId: StateFlow<Int>,
+    prefsRepository: PrefsRepository,
+    entitiesState: Flow<EntityDisplayState<EntityDisplay>>,
+    lifecycleScope: LifecycleCoroutineScope,
+): ItemList.Builder {
+    val listBuilder = ItemList.Builder()
+    domains.forEach { domain ->
+        val friendlyDomain =
+            SUPPORTED_DOMAINS_WITH_STRING[domain]?.let { carContext.getString(it) }
+                ?: domain.split("_").joinToString(" ") { word ->
+                    word.capitalize(Locale.getDefault())
+                }
+        val icon = Entity(
+            "$domain.ha_android_placeholder",
+            "",
+            mapOf<String, Any>(),
+            LocalDateTime.now(),
+            LocalDateTime.now(),
+        ).getIcon()
+
+        val entityList = entitiesState.map { state ->
+            (state as? EntityDisplayState.Loaded)?.entities.orEmpty()
+                .filter { it.domain == domain && !it.isHidden }
+        }
+        var domainIsEmpty = false
+        lifecycleScope.launch {
+            entityList.collect {
+                domainIsEmpty = it.isEmpty()
+            }
+        }
+        // TODO most probably this is always false since the launch will update the boolean after we actually test
+        if (!domainIsEmpty) {
+            listBuilder.addItem(
+                GridItem.Builder().apply {
+                    setImage(
+                        CarIcon.Builder(
+                            IconCompat.createWithBitmap(icon.toBitmap(carContext, 64, Color.WHITE)),
+                        )
+                            .setTint(CarColor.DEFAULT)
+                            .build(),
+                    )
+                }
+                    .setTitle(friendlyDomain)
+                    .setOnClickListener {
+                        lifecycleScope.launch {
+                            Timber.i("Domain:$domain clicked")
+                            screenManager.push(
+                                EntityGridVehicleScreen(
+                                    carContext,
+                                    serverManager,
+                                    serverId,
+                                    prefsRepository,
+                                    { serverManager.integrationRepository(serverId.value) },
+                                    friendlyDomain,
+                                    domains,
+                                    entityList,
+                                    entitiesState,
+                                ),
+                            )
+                        }
+                    }
+                    .build(),
+            )
+        }
+    }
+    listBuilder.setNoItemsMessage(carContext.getString(R.string.no_supported_entities))
+
+    return listBuilder
+}
+
+@RequiresApi(Build.VERSION_CODES.O)
+fun getDomainsGridItem(
+    carContext: CarContext,
+    screenManager: ScreenManager,
+    serverManager: ServerManager,
+    serverId: StateFlow<Int>,
+    entitiesState: Flow<EntityDisplayState<EntityDisplay>>,
+    prefsRepository: PrefsRepository,
+): GridItem.Builder {
+    return GridItem.Builder().apply {
+        setTitle(carContext.getString(R.string.all_entities))
+        setImage(
+            CarIcon.Builder(
+                IconCompat.createWithBitmap(Mdi.ViewList.toBitmap(carContext, 64, Color.WHITE)),
+            )
+                .setTint(CarColor.DEFAULT)
+                .build(),
+        )
+        setOnClickListener {
+            Timber.i("Categories clicked")
+            screenManager.push(
+                DomainListScreen(
+                    carContext,
+                    serverManager,
+                    serverId,
+                    entitiesState,
+                    prefsRepository,
+                ),
+            )
+        }
+    }
+}

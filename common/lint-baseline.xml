@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 9.4.1" type="baseline" client="gradle" dependencies="false" name="AGP (9.4.1)" variant="all" version="9.4.1">
+
+    <issue
+        id="MissingPermission"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`"
+        errorLine1="                    telephonyManager.isDataRoamingEnabled"
+        errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/sensors/MobileDataManager.kt"
+            line="85"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`"
+        errorLine1="                    telephonyManager.isDataEnabled"
+        errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/sensors/MobileDataManager.kt"
+            line="88"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`"
+        errorLine1="        val subscription = applicationContext.getSystemService&lt;SubscriptionManager>()"
+        errorLine2="                           ^">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/sensors/PhoneStateSensorManager.kt"
+            line="288"
+            column="28"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`"
+        errorLine1="        val subscription = applicationContext.getSystemService&lt;SubscriptionManager>()"
+        errorLine2="                           ^">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/sensors/PhoneStateSensorManager.kt"
+            line="332"
+            column="28"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`"
+        errorLine1="            state = dataTypeMap.getOrDefault(telephonyManager.dataNetworkType, STATE_UNKNOWN)"
+        errorLine2="                                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/sensors/PhoneStateSensorManager.kt"
+            line="340"
+            column="46"/>
+    </issue>
+
+    <issue
+        id="DefaultLocale"
+        message="Implicitly using the default locale is a common source of bugs: Use `String.format(Locale, ...)` instead"
+        errorLine1="        val sizeWithThousandsSeparator = String.format(&quot;%,d&quot;, sizeLong)"
+        errorLine2="                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/sensors/StorageSensorManager.kt"
+            line="148"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 29 (current min is 23): `android.telephony.TelephonyManager#isDataRoamingEnabled`"
+        errorLine1="                    telephonyManager.isDataRoamingEnabled"
+        errorLine2="                                     ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/sensors/MobileDataManager.kt"
+            line="85"
+            column="38"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 26 (current min is 23): `android.telephony.TelephonyManager#isDataEnabled`"
+        errorLine1="                    telephonyManager.isDataEnabled"
+        errorLine2="                                     ~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/sensors/MobileDataManager.kt"
+            line="88"
+            column="38"/>
+    </issue>
+
+    <issue
+        id="AppBundleLocaleChanges"
+        message="Found dynamic locale changes, but did not find corresponding Play Core library calls for downloading languages and splitting by language is not disabled in the `bundle` configuration"
+        errorLine1="        config.setLocale(Locale(&quot;en&quot;))"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/sensors/SensorUpdater.kt"
+            line="420"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;notifications&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;last_num_notifications&quot;>Last %1$d notifications&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="404"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ComposeNonRestartableComposable"
+        message="This composable&apos;s body only delegates to another composable. Consider marking it @NonRestartableComposable when its own restart and skip boundary is unlikely to be useful. The annotation avoids generating that code, but also prevents the wrapper from being restarted or skipped independently.&#xA;&#xA;See https://slackhq.github.io/compose-lints/rules/#avoid-unnecessary-restart-groups for more information."
+        errorLine1="@Composable"
+        errorLine2="~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/compose/composable/HADropdownMenu.kt"
+            line="101"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="AvoidAnySerializer"
+        message="Prefer polymorphic serializer over AnySerializer."
+        errorLine1="            MapAnySerializer,"
+        errorLine2="            ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/data/authentication/impl/AuthenticationRepositoryImpl.kt"
+            line="41"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="AvoidAnySerializer"
+        message="Prefer polymorphic serializer over AnySerializer."
+        errorLine1="                            kotlinJsonMapper.encodeToString(AnySerializer, item.value)"
+        errorLine2="                                                            ~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/sensors/SensorManager.kt"
+            line="375"
+            column="61"/>
+    </issue>
+
+    <issue
+        id="AvoidAnySerializer"
+        message="Prefer polymorphic serializer over AnySerializer."
+        errorLine1="                    kotlinJsonMapper.encodeToString(MapAnySerializer, outbound),"
+        errorLine2="                                                    ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/data/websocket/impl/WebSocketCoreImpl.kt"
+            line="286"
+            column="53"/>
+    </issue>
+
+    <issue
+        id="AvoidAnySerializer"
+        message="Prefer polymorphic serializer over AnySerializer."
+        errorLine1="                MapAnySerializer,"
+        errorLine2="                ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/data/websocket/impl/WebSocketCoreImpl.kt"
+            line="568"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="ComposeReadOnlyComposable"
+        message="All composable functions and properties used by this declaration are marked @ReadOnlyComposable, so this declaration can be marked @ReadOnlyComposable too.&#xA;&#xA;See https://slackhq.github.io/compose-lints/rules/#remove-unnecessary-composable-annotations for more information."
+        errorLine1="@Composable"
+        errorLine2="~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/compose/composable/HACheckbox.kt"
+            line="49"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="ComposeReadOnlyComposable"
+        message="All composable functions and properties used by this declaration are marked @ReadOnlyComposable, so this declaration can be marked @ReadOnlyComposable too.&#xA;&#xA;See https://slackhq.github.io/compose-lints/rules/#remove-unnecessary-composable-annotations for more information."
+        errorLine1="@Composable"
+        errorLine2="~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/compose/composable/HARadioGroup.kt"
+            line="211"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="ComposeReadOnlyComposable"
+        message="All composable functions and properties used by this declaration are marked @ReadOnlyComposable, so this declaration can be marked @ReadOnlyComposable too.&#xA;&#xA;See https://slackhq.github.io/compose-lints/rules/#remove-unnecessary-composable-annotations for more information."
+        errorLine1="@Composable"
+        errorLine2="~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/compose/composable/HASwitch.kt"
+            line="46"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="ComposeReadOnlyComposable"
+        message="All composable functions and properties used by this declaration are marked @ReadOnlyComposable, so this declaration can be marked @ReadOnlyComposable too.&#xA;&#xA;See https://slackhq.github.io/compose-lints/rules/#remove-unnecessary-composable-annotations for more information."
+        errorLine1="        @Composable"
+        errorLine2="        ~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/compose/theme/HATextStyle.kt"
+            line="33"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="ComposeReadOnlyComposable"
+        message="All composable functions and properties used by this declaration are marked @ReadOnlyComposable, so this declaration can be marked @ReadOnlyComposable too.&#xA;&#xA;See https://slackhq.github.io/compose-lints/rules/#remove-unnecessary-composable-annotations for more information."
+        errorLine1="        @Composable"
+        errorLine2="        ~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/compose/theme/HATextStyle.kt"
+            line="44"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="ComposeReadOnlyComposable"
+        message="All composable functions and properties used by this declaration are marked @ReadOnlyComposable, so this declaration can be marked @ReadOnlyComposable too.&#xA;&#xA;See https://slackhq.github.io/compose-lints/rules/#remove-unnecessary-composable-annotations for more information."
+        errorLine1="        @Composable"
+        errorLine2="        ~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/compose/theme/HATextStyle.kt"
+            line="55"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="ComposeReadOnlyComposable"
+        message="All composable functions and properties used by this declaration are marked @ReadOnlyComposable, so this declaration can be marked @ReadOnlyComposable too.&#xA;&#xA;See https://slackhq.github.io/compose-lints/rules/#remove-unnecessary-composable-annotations for more information."
+        errorLine1="        @Composable"
+        errorLine2="        ~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/homeassistant/companion/android/common/compose/theme/HATextStyle.kt"
+            line="93"
+            column="9"/>
+    </issue>
+
+</issues>

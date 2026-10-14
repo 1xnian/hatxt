@@ -1,0 +1,68 @@
+package io.homeassistant.companion.android.controls
+
+import android.content.Context
+import android.os.Build
+import android.service.controls.Control
+import android.service.controls.DeviceTypes
+import android.service.controls.actions.BooleanAction
+import android.service.controls.actions.ControlAction
+import android.service.controls.templates.ControlButton
+import android.service.controls.templates.ToggleTemplate
+import androidx.annotation.RequiresApi
+import io.homeassistant.companion.android.common.R as commonR
+import io.homeassistant.companion.android.common.data.integration.IntegrationRepository
+import io.homeassistant.companion.android.common.data.integration.display.EntityDisplayWithContext
+import io.homeassistant.companion.android.common.util.capitalize
+import java.util.Locale
+
+@RequiresApi(Build.VERSION_CODES.R)
+object DefaultSwitchControl : HaControl {
+    override fun provideControlFeatures(
+        context: Context,
+        control: Control.StatefulBuilder,
+        item: EntityDisplayWithContext,
+        info: HaControlInfo,
+    ): Control.StatefulBuilder {
+        control.setControlTemplate(
+            ToggleTemplate(
+                item.entityId,
+                ControlButton(
+                    item.isActive,
+                    "Description",
+                ),
+            ),
+        )
+        return control
+    }
+
+    override fun getDeviceType(item: EntityDisplayWithContext): Int = when (item.domain) {
+        "humidifier" -> DeviceTypes.TYPE_HUMIDIFIER
+        "remote" -> DeviceTypes.TYPE_REMOTE_CONTROL
+        "siren" -> DeviceTypes.TYPE_SECURITY_SYSTEM
+        "switch" -> DeviceTypes.TYPE_SWITCH
+        else -> DeviceTypes.TYPE_GENERIC_ON_OFF
+    }
+
+    override fun getDomainString(context: Context, item: EntityDisplayWithContext): String = when (item.domain) {
+        "automation" -> context.getString(commonR.string.domain_automation)
+        "humidifier" -> context.getString(commonR.string.domain_humidifier)
+        "input_boolean" -> context.getString(commonR.string.domain_input_boolean)
+        "remote" -> context.getString(commonR.string.domain_remote)
+        "siren" -> context.getString(commonR.string.domain_siren)
+        "switch" -> context.getString(commonR.string.domain_switch)
+        else -> item.domain.capitalize(Locale.getDefault())
+    }
+
+    override suspend fun performAction(
+        integrationRepository: IntegrationRepository,
+        action: ControlAction,
+        serverId: Int,
+    ): Boolean {
+        integrationRepository.callAction(
+            action.templateId.split(".")[0],
+            if ((action as? BooleanAction)?.newState == true) "turn_on" else "turn_off",
+            hashMapOf("entity_id" to action.templateId),
+        )
+        return true
+    }
+}

@@ -1,0 +1,191 @@
+package io.homeassistant.companion.android.di
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
+import androidx.media3.datasource.DataSource
+import dagger.Binds
+import dagger.Module
+import dagger.Provides
+import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
+import dagger.hilt.components.SingletonComponent
+import dagger.multibindings.Multibinds
+import io.homeassistant.companion.android.common.LocalStorageImpl
+import io.homeassistant.companion.android.common.data.HomeAssistantApis
+import io.homeassistant.companion.android.common.data.LocalStorage
+import io.homeassistant.companion.android.common.data.authentication.impl.AuthenticationService
+import io.homeassistant.companion.android.common.data.integration.impl.IntegrationService
+import io.homeassistant.companion.android.common.data.keychain.ClientCertificateManager
+import io.homeassistant.companion.android.common.data.keychain.KeyChainRepository
+import io.homeassistant.companion.android.common.data.keychain.KeyChainRepositoryImpl
+import io.homeassistant.companion.android.common.data.keychain.KeyStoreRepository
+import io.homeassistant.companion.android.common.data.keychain.KeyStoreRepositoryImpl
+import io.homeassistant.companion.android.common.data.prefs.PrefsRepository
+import io.homeassistant.companion.android.common.data.prefs.PrefsRepositoryImpl
+import io.homeassistant.companion.android.common.data.prefs.WearPrefsRepository
+import io.homeassistant.companion.android.common.data.prefs.WearPrefsRepositoryImpl
+import io.homeassistant.companion.android.common.util.MtlsAwareDataSourceFactory
+import io.homeassistant.companion.android.common.util.SdkVersion
+import io.homeassistant.companion.android.common.util.di.SuspendProvider
+import io.homeassistant.companion.android.common.util.getSharedPreferencesSuspend
+import io.homeassistant.companion.android.common.util.tts.AndroidTextToSpeechEngine
+import io.homeassistant.companion.android.common.util.tts.TextToSpeechClient
+import io.homeassistant.companion.android.di.qualifiers.NamedDeviceId
+import io.homeassistant.companion.android.di.qualifiers.NamedInstallId
+import io.homeassistant.companion.android.di.qualifiers.NamedIntegrationStorage
+import io.homeassistant.companion.android.di.qualifiers.NamedLegacyChangelogPref
+import io.homeassistant.companion.android.di.qualifiers.NamedManufacturer
+import io.homeassistant.companion.android.di.qualifiers.NamedModel
+import io.homeassistant.companion.android.di.qualifiers.NamedOsVersion
+import io.homeassistant.companion.android.di.qualifiers.NamedSessionStorage
+import io.homeassistant.companion.android.di.qualifiers.NamedThemesStorage
+import io.homeassistant.companion.android.di.qualifiers.NamedWearStorage
+import java.util.UUID
+import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
+import okhttp3.OkHttpClient
+
+@Module
+@InstallIn(SingletonComponent::class)
+internal abstract class DataModule {
+
+    companion object {
+        @Provides
+        @Singleton
+        fun provideAuthenticationService(homeAssistantApis: HomeAssistantApis): SuspendProvider<AuthenticationService> =
+            SuspendProvider { homeAssistantApis.getRetrofit().create(AuthenticationService::class.java) }
+
+        @Provides
+        @Singleton
+        fun providesIntegrationService(homeAssistantApis: HomeAssistantApis): SuspendProvider<IntegrationService> =
+            SuspendProvider { homeAssistantApis.getRetrofit().create(IntegrationService::class.java) }
+
+        @Provides
+        @Singleton
+        fun providesOkHttpClient(homeAssistantApis: HomeAssistantApis): SuspendProvider<OkHttpClient> =
+            SuspendProvider { homeAssistantApis.getOkHttpClient() }
+
+        @Provides
+        @Singleton
+        fun providesRealDataSourceFactory(
+            @ApplicationContext appContext: Context,
+            okHttpClientProvider: SuspendProvider<OkHttpClient>,
+            clientCertificateManager: ClientCertificateManager,
+        ): SuspendProvider<DataSource.Factory> = SuspendProvider {
+            val clientCert = clientCertificateManager.getClientCertProvider()
+            MtlsAwareDataSourceFactory(
+                context = appContext,
+                okHttpClient = okHttpClientProvider(),
+                usesMtls = { clientCert.certificate != null },
+            )
+        }
+
+        @Provides
+        @NamedSessionStorage
+        @Singleton
+        fun provideSessionLocalStorage(@ApplicationContext appContext: Context): LocalStorage = LocalStorageImpl {
+            appContext.getSharedPreferencesSuspend("session_0")
+        }
+
+        @Provides
+        @NamedIntegrationStorage
+        @Singleton
+        fun provideIntegrationLocalStorage(@ApplicationContext appContext: Context): LocalStorage = LocalStorageImpl {
+            appContext.getSharedPreferencesSuspend("integration_0")
+        }
+
+        @Provides
+        @NamedThemesStorage
+        @Singleton
+        fun providePrefsLocalStorage(@ApplicationContext appContext: Context): LocalStorage = LocalStorageImpl {
+            appContext.getSharedPreferencesSuspend("themes_0")
+        }
+
+        @Provides
+        @NamedWearStorage
+        @Singleton
+        fun provideWearPrefsLocalStorage(@ApplicationContext appContext: Context): LocalStorage = LocalStorageImpl {
+            appContext.getSharedPreferencesSuspend("wear_0")
+        }
+
+        // The changelog library (com.github.AppDevNext:ChangeLog) previously used by the app
+        // tracked the last shown version in its own preferences file: the presence of its pref
+        // means the app was updated from a version that used it.
+        @Provides
+        @NamedLegacyChangelogPref
+        @Singleton
+        fun provideLegacyChangelogPref(@ApplicationContext appContext: Context): SuspendProvider<Boolean> =
+            SuspendProvider(Dispatchers.IO) {
+                appContext.getSharedPreferencesSuspend("changelog").contains("ChangeLog_last_version_code")
+            }
+
+        @Provides
+        @NamedManufacturer
+        @Singleton
+        fun provideDeviceManufacturer(): String = Build.MANUFACTURER
+
+        @Provides
+        @NamedModel
+        @Singleton
+        fun provideDeviceModel(): String = Build.MODEL
+
+        @Provides
+        @NamedOsVersion
+        @Singleton
+        fun provideDeviceOsVersion() = SdkVersion.toString()
+
+        @SuppressLint("HardwareIds")
+        @Provides
+        @NamedDeviceId
+        @Singleton
+        fun provideDeviceId(@ApplicationContext appContext: Context): String = Settings.Secure.getString(
+            appContext.contentResolver,
+            Settings.Secure.ANDROID_ID,
+        )
+
+        @Provides
+        @NamedInstallId
+        @Singleton
+        fun provideInstallId(@ApplicationContext appContext: Context) = SuspendProvider {
+            val storage = provideSessionLocalStorage(appContext)
+            storage.getString("install_id") ?: run {
+                val uuid = UUID.randomUUID().toString()
+                storage.putString("install_id", uuid)
+                uuid
+            }
+        }
+
+        @Provides
+        @Singleton
+        fun packageManager(@ApplicationContext appContext: Context): PackageManager = appContext.packageManager
+
+        @Provides
+        @Singleton
+        fun providesTextToSpeechClient(@ApplicationContext appContext: Context): TextToSpeechClient =
+            TextToSpeechClient(appContext, AndroidTextToSpeechEngine(appContext))
+    }
+
+    @Binds
+    @Singleton
+    internal abstract fun bindPrefsRepository(prefsRepository: PrefsRepositoryImpl): PrefsRepository
+
+    @Binds
+    @Singleton
+    internal abstract fun bindWearPrefsRepository(wearPrefsRepository: WearPrefsRepositoryImpl): WearPrefsRepository
+
+    @Binds
+    @Singleton
+    internal abstract fun bindKeyChainRepository(keyChainRepository: KeyChainRepositoryImpl): KeyChainRepository
+
+    @Binds
+    @Singleton
+    internal abstract fun bindKeyStoreRepository(keyStoreRepository: KeyStoreRepositoryImpl): KeyStoreRepository
+
+    @Multibinds
+    abstract fun bindOkHttpClientConfigurator(): Set<@JvmSuppressWildcards OkHttpConfigurator>
+}
+
+interface OkHttpConfigurator : (OkHttpClient.Builder) -> Unit

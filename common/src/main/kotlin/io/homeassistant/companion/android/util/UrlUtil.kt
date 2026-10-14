@@ -1,0 +1,262 @@
+package io.homeassistant.companion.android.util
+
+import android.net.Uri
+import androidx.core.net.toUri
+import io.homeassistant.companion.android.common.BuildConfig
+import io.homeassistant.companion.android.common.data.MalformedHttpUrlException
+import io.homeassistant.companion.android.common.data.authentication.impl.AuthenticationService
+import java.net.InetAddress
+import java.net.URI
+import java.net.URL
+import java.net.UnknownHostException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import timber.log.Timber
+
+// Matched ignoring case since the value is often typed by hand in a notification command
+private val absoluteUrlRegex = Regex("^https?://", RegexOption.IGNORE_CASE)
+
+object UrlUtil {
+    /**
+     * Extracts the base URL (scheme, host, and port) from the given URL string,
+     * stripping any path, query parameters, and fragments.
+     *
+     * @param url the full URL string to extract the base from
+     * @return the base URL containing only the scheme, host, and port, with a trailing `/`
+     * @throws MalformedHttpUrlException if [url] is empty or not a valid HTTP(S) URL
+     */
+    fun extractBaseUrl(url: String): String {
+        return if (url == "") {
+            throw MalformedHttpUrlException()
+        } else {
+            try {
+                val httpUrl = url.toHttpUrl()
+                HttpUrl.Builder()
+                    .scheme(httpUrl.scheme)
+                    .host(httpUrl.host)
+                    .port(httpUrl.port)
+                    .toString()
+            } catch (e: IllegalArgumentException) {
+                throw MalformedHttpUrlException(
+                    e.message,
+                )
+            }
+        }
+    }
+
+    fun buildAuthenticationUrl(url: String): String {
+        return url.toHttpUrlOrNull()!!
+            .newBuilder()
+            .addPathSegments("auth/authorize")
+            .addEncodedQueryParameter("response_type", "code")
+            .addEncodedQueryParameter("client_id", AuthenticationService.CLIENT_ID)
+            .build()
+            .toString()
+    }
+
+    /**
+     * Resolves a URL input string against a base URL.
+     *
+     * @param base The base URL to resolve relative URLs against. Can be null if input is absolute.
+     * @param input The URL string to resolve. Supported formats:
+     *   - Absolute URL (http://... or https://...)
+     *   - Relative path to be resolved against base
+     *   - Deep link URL with homeassistant://navigate/ prefix
+     * @return The resolved URL, the base URL if input is invalid, or null if resolution fails
+     */
+    fun handle(base: URL?, input: String): URL? {
+        val normalizedInput = input.removePrefix("homeassistant://navigate/")
+
+        val uri = try {
+            URI(normalizedInput)
+        } catch (e: Exception) {
+            Timber.w(e, "Invalid URI input: $normalizedInput")
+            return base
+        }
+
+        return when {
+            isAbsoluteUrl(input) -> {
+                uri.runCatching { toURL() }
+                    .onFailure { Timber.w(it, "Failed to convert URI to URL: $normalizedInput") }
+                    .getOrNull()
+            }
+
+            else -> buildRelativeUrl(base, uri)
+        }
+    }
+
+    fun isAbsoluteUrl(it: String?): Boolean {
+        return absoluteUrlRegex.containsMatchIn(it.orEmpty())
+    }
+
+    fun splitNfcTagId(it: Uri?): String? {
+        val matches = nfcTagUrlRegex.find(it.toString())
+        return matches?.groups?.get(1)?.value
+    }
+
+    /**
+     * Matches `https://www.home-assistant.io/tag/<id>` URLs in production. Debug builds also
+     * accept `next.home-assistant.io` so the tag flow can be exercised against the next branch
+     * of the documentation site.
+     */
+    private val nfcTagUrlRegex: Regex = if (BuildConfig.DEBUG) {
+        Regex("^https?://(?:www|next)\\.home-assistant\\.io/tag/(.*)")
+    } else {
+        Regex("^https?://www\\.home-assistant\\.io/tag/(.*)")
+    }
+
+    private fun buildRelativeUrl(base: URL?, uri: URI): URL? {
+        val builder = base?.toHttpUrlOrNull()?.newBuilder() ?: return null
+
+        return builder.apply {
+            uri.path?.takeIf { it.isNotBlank() }?.let {
+                addPathSegments(it.trim().removePrefix("/"))
+            }
+            uri.query?.takeIf { it.isNotBlank() }?.let {
+                query(it.trim())
+            }
+            uri.fragment?.takeIf { it.isNotBlank() }?.let {
+                fragment(it.trim())
+            }
+        }.build().toUrl()
+    }
+}
+
+/**
+ * Determines if this URL is publicly accessible using Fully Qualified Domain Name (FQDN) or a public IP.
+ *
+ * A URL is considered to be publicly accessible if:
+ * 1. Its hostname does NOT end with a known local TLD (`.local`, `.lan`, `.home`, `.internal`,
+ *    `.localdomain`), AND
+ * 2. When resolved via DNS, ALL of its IP addresses are public (not private RFC 1918 addresses,
+ *    not loopback, not link-local, and not any-local addresses).
+ *
+ * This function performs DNS resolution on the IO dispatcher and may block briefly while
+ * resolving the hostname.
+ *
+ * @return `true` if the URL is publicly accessible, `false` if it is local/private or
+ *         if DNS resolution fails.
+ */
+suspend fun URL.isPubliclyAccessible(): Boolean {
+    return isPubliclyAccessible(host)
+}
+
+/** [HttpUrl] overload — see [URL.isPubliclyAccessible] for behavior. */
+suspend fun HttpUrl.isPubliclyAccessible(): Boolean {
+    return isPubliclyAccessible(host)
+}
+
+private suspend fun isPubliclyAccessible(fqdn: String): Boolean {
+    // Check TLD
+    val localTlds = listOf(".local", ".lan", ".home", ".internal", ".localdomain")
+    if (localTlds.any { fqdn.endsWith(it, ignoreCase = true) }) {
+        return false
+    }
+
+    // Resolve and check IP
+    return try {
+        val addresses = withContext(Dispatchers.IO) {
+            InetAddress.getAllByName(fqdn)
+        }
+        addresses.none { it.isPrivateOrLocal() }
+    } catch (_: UnknownHostException) {
+        false
+    }
+}
+
+private fun InetAddress.isPrivateOrLocal(): Boolean {
+    return this.isSiteLocalAddress ||
+        // Private IP ranges (RFC 1918)
+        this.isLoopbackAddress ||
+        // 127.0.0.0/8 or ::1
+        this.isLinkLocalAddress ||
+        // 169.254.0.0/16 or fe80::/10
+        this.isAnyLocalAddress // 0.0.0.0 or ::
+}
+
+/**
+ * Checks if this URL has the same origin (scheme, host, and port) as the other URL.
+ *
+ * @param other the URL to compare against
+ * @return `true` if both URLs have the same scheme, host, and port
+ */
+fun HttpUrl.hasSameOrigin(other: HttpUrl): Boolean {
+    return scheme.equals(other.scheme, ignoreCase = true) &&
+        host.equals(other.host, ignoreCase = true) &&
+        port == other.port
+}
+
+/**
+ * Checks if this Uri has the same origin (scheme, host, and port) as the other Uri.
+ * Default ports (443 for HTTPS, 80 for HTTP) are normalized for comparison.
+ *
+ * @param other the Uri to compare against
+ * @return `true` if both URIs have the same scheme, host, and port
+ */
+fun Uri.hasSameOrigin(other: Uri?): Boolean {
+    if (other == null) return false
+    return scheme.equals(other.scheme, ignoreCase = true) &&
+        host.equals(other.host, ignoreCase = true) &&
+        effectivePort == other.effectivePort
+}
+
+/**
+ * Checks if this Uri has the same origin (scheme, host, and port) as the [other] URL string.
+ * Default ports (443 for HTTPS, 80 for HTTP) are normalized for comparison.
+ *
+ * Convenience overload for callers that hold the other side as a raw URL string; the string is parsed
+ * into a [Uri] before comparison.
+ *
+ * @param other the URL string to compare against; a `null` or unparsable value never matches
+ * @return `true` if both origins share the same scheme, host, and port
+ */
+fun Uri.hasSameOrigin(other: String?): Boolean = hasSameOrigin(other?.toUri())
+
+private val Uri.effectivePort: Int
+    get() = when {
+        port != -1 -> port
+        scheme.equals("https", ignoreCase = true) -> 443
+        scheme.equals("http", ignoreCase = true) -> 80
+        else -> -1
+    }
+
+/**
+ * Checks if this Uri has a non root path (not empty, not just "/").
+ *
+ * @return `true` if the Uri has a path that is not blank and not just "/"
+ */
+fun Uri.hasNonRootPath(): Boolean {
+    val path = this.path ?: return false
+    return path.isNotBlank() && path != "/"
+}
+
+/**
+ * Extracts the relative URL (path, filtered query parameters, and fragment) from this [Uri].
+ *
+ * The root path (`/`) is treated as empty since it represents the home page with no
+ * meaningful relative navigation.
+ *
+ * @param excludeParams query parameter names to omit from the result
+ * @return the relative URL string (e.g. `/history?start_date=2026-01-01#tab`),
+ *         or `null` if the path is root-only or the result would be empty.
+ */
+fun Uri.toRelativeUrl(excludeParams: Set<String> = emptySet()): String? {
+    val path = encodedPath?.takeIf { it.length > 1 } ?: return null
+
+    val relativeUrl = Uri.Builder()
+        .encodedPath(path)
+        .apply {
+            queryParameterNames
+                .filterNot { it in excludeParams }
+                .flatMap { name -> getQueryParameters(name).map { name to it } }
+                .forEach { (name, value) -> appendQueryParameter(name, value) }
+        }
+        .encodedFragment(encodedFragment)
+        .build()
+        .toString()
+
+    return relativeUrl.takeIf { it.isNotEmpty() }
+}

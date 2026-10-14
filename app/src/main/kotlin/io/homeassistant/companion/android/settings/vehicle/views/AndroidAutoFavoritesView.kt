@@ -1,0 +1,158 @@
+package io.homeassistant.companion.android.settings.vehicle.views
+
+import android.os.Build
+import androidx.annotation.RequiresApi
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.CircularProgressIndicator
+import androidx.compose.material.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import io.homeassistant.companion.android.common.R as commonR
+import io.homeassistant.companion.android.common.compose.theme.HATheme
+import io.homeassistant.companion.android.common.data.integration.display.EntityDisplayState
+import io.homeassistant.companion.android.common.data.integration.display.EntityDisplayWithContext
+import io.homeassistant.companion.android.common.data.prefs.AutoFavorite
+import io.homeassistant.companion.android.database.server.Server
+import io.homeassistant.companion.android.settings.vehicle.ManageAndroidAutoViewModel
+import io.homeassistant.companion.android.util.compose.FavoriteEntityRow
+import io.homeassistant.companion.android.util.compose.ServerExposedDropdownMenu
+import io.homeassistant.companion.android.util.compose.entity.EntityPicker
+import io.homeassistant.companion.android.util.plus
+import io.homeassistant.companion.android.util.safeBottomPaddingValues
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
+
+@RequiresApi(Build.VERSION_CODES.O)
+@Composable
+fun AndroidAutoFavoritesSettings(
+    androidAutoViewModel: ManageAndroidAutoViewModel,
+    serversList: List<Server>,
+    defaultServer: Int,
+    modifier: Modifier = Modifier,
+) {
+    val lazyListState = rememberLazyListState()
+    val reorderState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        androidAutoViewModel.onMove(from, to)
+        androidAutoViewModel.saveFavorites()
+    }
+
+    var selectedServer by remember(defaultServer) { mutableIntStateOf(defaultServer) }
+
+    val favoriteEntities = androidAutoViewModel.favoritesList.toList()
+    val displayState = androidAutoViewModel.displayEntities
+    val loadedEntities = (displayState as? EntityDisplayState.Loaded)?.entities.orEmpty()
+    // The picker shows the entities not already in the favorites; build the filtered state off
+    // the main thread so its entity index is not computed on the compose thread.
+    var pickerDisplayState by remember {
+        mutableStateOf<EntityDisplayState<EntityDisplayWithContext>>(EntityDisplayState.Loading)
+    }
+    LaunchedEffect(favoriteEntities.size, displayState, selectedServer) {
+        pickerDisplayState = when (displayState) {
+            is EntityDisplayState.Loading -> EntityDisplayState.Loading
+            is EntityDisplayState.Error -> EntityDisplayState.Error
+            is EntityDisplayState.Loaded -> withContext(Dispatchers.IO) {
+                EntityDisplayState.Loaded(
+                    displayState.entities.filter {
+                        !favoriteEntities.contains(AutoFavorite(selectedServer, it.entityId))
+                    },
+                )
+            }
+        }
+    }
+
+    LazyColumn(
+        state = lazyListState,
+        contentPadding = PaddingValues(vertical = 16.dp) + safeBottomPaddingValues(applyHorizontal = false),
+        modifier = modifier,
+    ) {
+        item {
+            Text(
+                text = stringResource(commonR.string.aa_set_favorites),
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp),
+            )
+        }
+
+        if (androidAutoViewModel.isLoading) {
+            item {
+                Box(modifier = Modifier.fillMaxWidth().padding(top = 16.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+        } else {
+            if (serversList.size > 1) {
+                item {
+                    ServerExposedDropdownMenu(
+                        servers = serversList,
+                        current = selectedServer,
+                        onSelected = {
+                            androidAutoViewModel.loadEntities(it)
+                            selectedServer = it
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
+                    )
+                }
+            }
+
+            item {
+                // TODO use new theme for Material3 components https://github.com/home-assistant/android/issues/6302
+                HATheme {
+                    EntityPicker(
+                        displayState = pickerDisplayState,
+                        selectedEntityId = null,
+                        onSelectionChanged = { entityId ->
+                            entityId?.let { androidAutoViewModel.onEntitySelected(true, it, selectedServer) }
+                        },
+                        addButtonText = stringResource(commonR.string.add_favorite),
+                        modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp),
+                    )
+                }
+            }
+            if (favoriteEntities.isNotEmpty() && loadedEntities.isNotEmpty()) {
+                items(favoriteEntities.size, { favoriteEntities[it] }) { index ->
+                    val favoriteEntity = favoriteEntities[index]
+                    (displayState as? EntityDisplayState.Loaded)
+                        ?.takeIf { favoriteEntity.serverId == selectedServer }
+                        ?.entity(favoriteEntity.entityId)
+                        ?.let {
+                            ReorderableItem(
+                                state = reorderState,
+                                key = favoriteEntities[index],
+                            ) { isDragging ->
+                                FavoriteEntityRow(
+                                    entity = it,
+                                    onClick = {
+                                        androidAutoViewModel.onEntitySelected(
+                                            false,
+                                            it.entityId,
+                                            selectedServer,
+                                        )
+                                    },
+                                    checked = true,
+                                    draggable = true,
+                                    isDragging = isDragging,
+                                )
+                            }
+                        }
+                }
+            }
+        }
+    }
+}

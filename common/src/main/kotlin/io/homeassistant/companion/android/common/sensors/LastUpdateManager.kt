@@ -1,0 +1,117 @@
+package io.homeassistant.companion.android.common.sensors
+
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
+import io.homeassistant.companion.android.common.R as commonR
+import io.homeassistant.companion.android.common.data.servers.ServerManager
+import io.homeassistant.companion.android.common.sensors.SensorManager.BasicSensor.Setting
+import io.homeassistant.companion.android.database.sensor.SensorSetting
+import io.homeassistant.companion.android.database.sensor.SensorSettingType
+import javax.inject.Inject
+import javax.inject.Singleton
+import timber.log.Timber
+
+@Singleton
+class LastUpdateManager @Inject constructor(
+    @ApplicationContext override val applicationContext: Context,
+    override val sensorRepository: SensorRepository,
+    override val serverManager: ServerManager,
+) : SensorManager {
+    companion object {
+        private const val SETTING_ADD_NEW_INTENT = "lastupdate_add_new_intent"
+        private const val INTENT_SETTING_PREFIX = "lastupdate_intent_var1:"
+
+        @ProvidesSensor
+        val lastUpdate = SensorManager.BasicSensor(
+            "last_update",
+            "sensor",
+            commonR.string.basic_sensor_name_last_update,
+            commonR.string.sensor_description_last_update,
+            "mdi:update",
+            entityCategory = SensorManager.ENTITY_CATEGORY_DIAGNOSTIC,
+            updateType = SensorManager.BasicSensor.UpdateType.INTENT,
+            settings = listOf(
+                Setting.Toggle(SETTING_ADD_NEW_INTENT, default = false),
+            ),
+        )
+    }
+
+    override fun docsLink(): String {
+        return "https://companion.home-assistant.io/docs/core/sensors#last-update-trigger-sensor"
+    }
+    override val name: Int
+        get() = commonR.string.sensor_name_last_update
+
+    override suspend fun getAvailableSensors(): List<SensorManager.BasicSensor> {
+        return listOf(lastUpdate)
+    }
+
+    override fun requiredPermissions(sensorId: String): Array<String> {
+        return emptyArray()
+    }
+
+    override suspend fun requestSensorUpdate() {
+        // No op
+    }
+
+    suspend fun sendLastUpdate(intentAction: String?) {
+        if (!isEnabled(lastUpdate)) {
+            return
+        }
+
+        if (intentAction.isNullOrEmpty()) {
+            return
+        }
+
+        Timber.d("Last update is $intentAction")
+
+        onSensorUpdated(
+            lastUpdate,
+            intentAction,
+            lastUpdate.statelessIcon,
+            mapOf(),
+        )
+
+        val sensorRepository = sensorRepository
+        val (settingsToRemove, allSettings) = sensorRepository.getSettings(lastUpdate.id).partition { setting ->
+            setting.value.isEmpty()
+        }
+        if (settingsToRemove.isNotEmpty()) {
+            sensorRepository.removeSettings(lastUpdate.id, settingsToRemove.map { it.name })
+        }
+        val intentSettings = allSettings.filter {
+            it.name.startsWith(INTENT_SETTING_PREFIX)
+        }.sortedBy {
+            it.name.removeSuffix(":").substringAfterLast(':').toInt()
+        }
+        val isSequenceContinuous = intentSettings.withIndex().all { (index, setting) ->
+            val ordinal = setting.name.removePrefix(INTENT_SETTING_PREFIX).removeSuffix(":").toInt()
+            ordinal == index + 1
+        }
+        if (!isSequenceContinuous) {
+            // create new settings with sequential IDs:
+            val newIntentSettings = intentSettings.mapIndexed { index, setting ->
+                setting.copy(name = "$INTENT_SETTING_PREFIX${index + 1}:")
+            }
+            // delete old settings from DB:
+            sensorRepository.removeSettings(lastUpdate.id, intentSettings.map { it.name })
+            // add new settings to DB:
+            newIntentSettings.forEach {
+                sensorRepository.addDynamicSetting(it)
+            }
+        }
+        val addNewIntentToggle = allSettings.first { it.name == SETTING_ADD_NEW_INTENT }
+        if (addNewIntentToggle.value == "true") {
+            val newIntentSettingOrdinal = intentSettings.size + 1
+            val newIntentSettingName = "$INTENT_SETTING_PREFIX$newIntentSettingOrdinal:"
+            if (allSettings.none { it.name == newIntentSettingName }) {
+                // turn off the toggle:
+                sensorRepository.updateSettingValue(lastUpdate.id, SETTING_ADD_NEW_INTENT, "false")
+                // add the new Intent:
+                sensorRepository.addDynamicSetting(
+                    SensorSetting(lastUpdate.id, newIntentSettingName, intentAction, SensorSettingType.STRING),
+                )
+            }
+        }
+    }
+}

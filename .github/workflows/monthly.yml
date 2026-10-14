@@ -1,0 +1,27 @@
+name: Bump our Calendar Version
+
+on: # yamllint disable-line rule:truthy
+  workflow_dispatch:
+  schedule:
+    - cron: "30 3 1 * *"
+jobs:
+  tag:
+    name: Tag Monthly Release
+    runs-on: ubuntu-latest
+    if: github.repository == 'home-assistant/android'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Get Current Time
+        uses: josStorer/get-current-time@6826799222c9d913068c04cb99e67f34dbf3caae # v2.1.3
+        id: current-time
+
+      - name: Bump Calendar Version
+        uses: rickstaa/action-create-tag@a1c7777fcb2fee4f19b0f283ba888afa11678b72 # v1.7.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ steps.current-time.outputs.year }}.${{ steps.current-time.outputs.month }}.0

@@ -1,0 +1,31 @@
+package io.homeassistant.companion.android.database.qs
+
+import androidx.room3.Dao
+import androidx.room3.Insert
+import androidx.room3.OnConflictStrategy
+import androidx.room3.Query
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface TileDao {
+
+    @Query("SELECT * FROM qs_tiles WHERE tile_id = :tileId")
+    suspend fun get(tileId: String): TileEntity?
+
+    @Query("SELECT * FROM qs_tiles")
+    suspend fun getAll(): List<TileEntity>
+
+    /** Observes all stored tiles, emitting again on every change to the table. */
+    @Query("SELECT * FROM qs_tiles")
+    fun getAllFlow(): Flow<List<TileEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun add(tileEntity: TileEntity): Long
+}
+
+suspend fun TileDao.getHighestInUse(): TileEntity? {
+    return getAll()
+        .filter { it.added || it.isSetup }
+        .sortedByDescending { it.tileId.split("_")[1].toInt() }
+        .getOrNull(0)
+}
