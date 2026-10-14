@@ -3,6 +3,9 @@ package io.homeassistant.companion.android.common.data.websocket.impl
 import app.cash.turbine.test
 import app.cash.turbine.turbineScope
 import io.homeassistant.companion.android.common.data.authentication.AuthenticationRepository
+import io.homeassistant.companion.android.common.data.endpoint.ConnectDecision
+import io.homeassistant.companion.android.common.data.endpoint.ConnectGateResult
+import io.homeassistant.companion.android.common.data.endpoint.EndpointRepository
 import io.homeassistant.companion.android.common.data.servers.ServerConnectionStateProvider
 import io.homeassistant.companion.android.common.data.servers.ServerManager
 import io.homeassistant.companion.android.common.data.servers.UrlState
@@ -84,13 +87,32 @@ class WebSocketCoreImplTest {
         unmockkAll()
     }
 
+    /**
+     * A relaxed [ServerManager] whose dynamic-address gate lets the connection proceed.
+     *
+     * `connect()` always asks the endpoint repository for the pre-connect gate before it opens a
+     * socket. Left to a relaxed mock, that call would return a relaxed [ConnectGateResult] whose
+     * `mayConnect` getter — a mocked `Boolean` — answers `false`, so every connection would be
+     * refused. These tests describe the WebSocket itself, so the gate is stubbed to "carry on";
+     * the gate's own policy is covered by `DynamicAddressGate` below and by `EndpointConnectGateTest`.
+     */
+    private fun permissiveServerManager(): ServerManager {
+        val endpointRepository = mockk<EndpointRepository>(relaxed = true)
+        coEvery { endpointRepository.ensureFreshBeforeConnect() } returns ConnectGateResult(
+            decision = ConnectDecision.PROCEED,
+        )
+        return mockk<ServerManager>(relaxed = true).also { manager ->
+            coEvery { manager.endpointRepository(any()) } returns endpointRepository
+        }
+    }
+
     private fun TestScope.setupServer(
         url: String = "https://io.ha",
         backgroundScope: CoroutineScope = this.backgroundScope,
         urlFlow: Flow<UrlState>? = null,
     ) {
         mockOkHttpClient = mockk<OkHttpClient>(relaxed = true)
-        val mockServerManager = mockk<ServerManager>(relaxed = true)
+        val mockServerManager = permissiveServerManager()
         val mockAuthenticationRepository = mockk<AuthenticationRepository>(relaxed = true)
         val mockConnectionStateProvider = mockk<ServerConnectionStateProvider>(relaxed = true)
 
@@ -175,6 +197,41 @@ class WebSocketCoreImplTest {
         }
     }
 
+    /**
+     * Covers the "the address has to be re-resolved before every session" rule at the point where it
+     * is enforced: [WebSocketCoreImpl.connect].
+     *
+     * The gate saying "carry on" is covered by the `Connect` tests below, which use
+     * [permissiveServerManager]. This class covers the other half: a gate that refuses must stop the
+     * connection before a socket exists.
+     */
+    @Nested
+    inner class DynamicAddressGate {
+
+        @Test
+        fun `Given a blocked pre-connect gate When connect is invoked Then it returns false and no socket is created`() =
+            runTest {
+                val serverManager = mockk<ServerManager>(relaxed = true)
+                val endpointRepository = mockk<EndpointRepository>(relaxed = true)
+                coEvery { endpointRepository.ensureFreshBeforeConnect() } returns ConnectGateResult(
+                    decision = ConnectDecision.BLOCKED,
+                    message = "no address has ever been validated for this server",
+                )
+                coEvery { serverManager.endpointRepository(any()) } returns endpointRepository
+
+                val webSocketCore = WebSocketCoreImpl(
+                    okHttpClient = mockk(relaxed = true),
+                    serverManager = serverManager,
+                    serverId = 1,
+                )
+
+                assertFalse(webSocketCore.connect())
+                // The gate refused before anything happened: the client is still in its initial state
+                // and never started an authentication attempt against the rejected address.
+                assertEquals(WebSocketState.Initial, webSocketCore.getConnectionState())
+            }
+    }
+
     @Nested
     inner class Connect {
         @ParameterizedTest
@@ -192,7 +249,7 @@ class WebSocketCoreImplTest {
 
         @Test
         fun `Given no URL When connect is invoked Then it returns false and connection state is ClosedOther`() = runTest {
-            val serverManager = mockk<ServerManager>(relaxed = true)
+            val serverManager = permissiveServerManager()
             val mockConnectionStateProvider = mockk<ServerConnectionStateProvider>(relaxed = true)
             coEvery { serverManager.connectionStateProvider(1) } returns mockConnectionStateProvider
             coEvery { mockConnectionStateProvider.urlFlow() } returns flowOf(UrlState.HasUrl(null))
@@ -211,7 +268,7 @@ class WebSocketCoreImplTest {
 
         @Test
         fun `Given InsecureState When connect is invoked Then it returns false and connection state is ClosedOther`() = runTest {
-            val serverManager = mockk<ServerManager>(relaxed = true)
+            val serverManager = permissiveServerManager()
             val mockConnectionStateProvider = mockk<ServerConnectionStateProvider>(relaxed = true)
             coEvery { serverManager.connectionStateProvider(1) } returns mockConnectionStateProvider
             coEvery { mockConnectionStateProvider.urlFlow() } returns flowOf(UrlState.InsecureState)

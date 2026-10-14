@@ -4,6 +4,8 @@ import io.homeassistant.companion.android.common.data.LocalStorage
 import io.homeassistant.companion.android.common.data.authentication.AuthenticationRepositoryFactory
 import io.homeassistant.companion.android.common.data.authentication.SessionState
 import io.homeassistant.companion.android.common.data.authentication.impl.AuthenticationRepositoryImpl
+import io.homeassistant.companion.android.common.data.endpoint.EndpointRepositoryFactory
+import io.homeassistant.companion.android.common.data.endpoint.EndpointSettingsStore
 import io.homeassistant.companion.android.common.data.integration.IntegrationRepositoryFactory
 import io.homeassistant.companion.android.common.data.integration.impl.IntegrationRepositoryImpl
 import io.homeassistant.companion.android.common.data.prefs.PrefsRepository
@@ -49,6 +51,8 @@ class ServerManagerImplTest {
     private val integrationRepositoryFactory: IntegrationRepositoryFactory = mockk()
     private val webSocketRepositoryFactory: WebSocketRepositoryFactory = mockk()
     private val serverConnectionStateProviderFactory: ServerConnectionStateProviderFactory = mockk()
+    private val endpointRepositoryFactory: EndpointRepositoryFactory = mockk()
+    private val endpointSettingsStore: EndpointSettingsStore = mockk(relaxed = true)
     private val prefsRepository: PrefsRepository = mockk()
     private val serverDao: ServerDao = mockk()
     private val sensorRepository: SensorRepository = mockk()
@@ -72,11 +76,15 @@ class ServerManagerImplTest {
 
     @BeforeEach
     fun setup() {
+        // removeServer() clears the persisted endpoint settings of the server through the factory,
+        // so the store it hands out has to answer.
+        every { endpointRepositoryFactory.settingsStore() } returns endpointSettingsStore
         serverManager = ServerManagerImpl(
             authenticationRepositoryFactory = authenticationRepositoryFactory,
             integrationRepositoryFactory = integrationRepositoryFactory,
             webSocketRepositoryFactory = webSocketRepositoryFactory,
             serverConnectionStateProviderFactory = serverConnectionStateProviderFactory,
+            endpointRepositoryFactory = endpointRepositoryFactory,
             prefsRepository = prefsRepository,
             serverDao = serverDao,
             sensorRepository = sensorRepository,

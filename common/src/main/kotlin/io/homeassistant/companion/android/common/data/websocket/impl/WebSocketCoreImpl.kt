@@ -318,7 +318,13 @@ internal class WebSocketCoreImpl(
             !gate.mayConnect -> Timber.e("Dynamic address check blocked the connection: %s", gate.message)
         }
         gate.mayConnect
-    } catch (e: IllegalStateException) {
+    } catch (e: CancellationException) {
+        // Cancelling the caller must never be turned into a decision about the address.
+        throw e
+    } catch (e: Exception) {
+        // The check itself failing (no server row yet, storage error) must not make the client worse
+        // than it was before this feature: the configured address is still used. A *negative* answer
+        // from a gate that did run is handled above and still blocks.
         Timber.w(e, "Dynamic address check unavailable, continuing with the configured address")
         true
     }

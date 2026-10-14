@@ -34,7 +34,18 @@ find_tool() {
         command -v "$name"
         return 0
     fi
-    find "$(sdk_root)/$dir" -maxdepth 3 -type f -name "$name" 2>/dev/null | sort -V | tail -n 1
+    # The SDK ships Windows executables with a .exe suffix; looking for the bare name keeps the
+    # script usable outside CI, where a maintainer may run it from Git Bash.
+    local candidate
+    for candidate in "$name" "$name.exe" "$name.bat"; do
+        local found
+        found="$(find "$(sdk_root)/$dir" -maxdepth 3 -type f -name "$candidate" 2>/dev/null | sort -V | tail -n 1)"
+        if [ -n "$found" ]; then
+            echo "$found"
+            return 0
+        fi
+    done
+    return 0
 }
 
 # Extracts printable strings from a binary. `strings` is preferred, `tr` is the fallback.

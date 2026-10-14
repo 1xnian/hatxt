@@ -11,6 +11,7 @@ import io.homeassistant.companion.android.common.util.MapAnySerializer
 import io.homeassistant.companion.android.common.util.kotlinJsonMapper
 import io.homeassistant.companion.android.database.server.Server
 import io.homeassistant.companion.android.database.server.ServerSessionInfo
+import kotlinx.coroutines.CancellationException
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import timber.log.Timber
@@ -140,7 +141,9 @@ class AuthenticationRepositoryImpl internal constructor(
             } else if (!gate.mayConnect) {
                 Timber.e("No validated address is available for the session: %s", gate.message)
             }
-        } catch (e: IllegalStateException) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
             Timber.w(e, "Dynamic address check unavailable before login")
         }
     }
