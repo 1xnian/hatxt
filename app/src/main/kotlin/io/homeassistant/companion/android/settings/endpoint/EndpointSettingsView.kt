@@ -180,7 +180,11 @@ fun EndpointSettingsView(
                     RadioButtonRow(
                         text = stringResource(commonR.string.endpoint_interval_custom),
                         selected = state.customIntervalInput.isNotEmpty(),
-                        onClick = onCustomIntervalChange,
+                        // Selecting "Custom…" seeds the text field with the interval that is active
+                        // right now, so the user edits a real value instead of an empty box. A
+                        // non-empty customIntervalInput is also what marks the custom row as
+                        // selected, which is why the callback takes the seeded value.
+                        onClick = { onCustomIntervalChange(settings.refreshIntervalSeconds.toString()) },
                     )
                     if (state.customIntervalInput.isNotEmpty()) {
                         OutlinedTextField(

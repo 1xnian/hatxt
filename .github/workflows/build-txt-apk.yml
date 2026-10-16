@@ -83,20 +83,42 @@ jobs:
           cp .github/mock-google-services.json wear/google-services.json
           cp .github/mock-google-services.json automotive/google-services.json
 
-      - name: Resolve the locked runtime classpath
+      - name: Verify the committed dependency lock state
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p diagnostics
-          # Dependency locking is enabled project wide. Resolving here proves that the committed lock
-          # state matches the declared graph: a mismatch aborts with LockOutOfDateException instead
-          # of silently drifting to another version.
-          ./gradlew :app:dependencies --configuration minimalDebugRuntimeClasspath > diagnostics/dependencies-minimalDebug.txt
+          # Dependency locking is enabled project wide. A module that is listed in gradle.lockfile
+          # but is no longer part of the declared graph is injected back by the lock state, cannot be
+          # resolved, and shows up as `<module> FAILED` in this report; a real resolution of the same
+          # configuration then aborts with
+          #   LockOutOfDateException: Did not resolve '<module>' which is part of the dependency lock
+          #   state
+          # The dump is produced by the lenient report on purpose: resolving `:app`'s flavoured
+          # classpaths from a standalone task fails on project variant selection
+          # (ArtifactSelectionException on :common, which has no matching product flavour), which
+          # would hide the lock violation behind an unrelated error. The authoritative resolution
+          # happens in the assemble step below.
+          ./gradlew :app:dependencies --configuration minimalDebugRuntimeClasspath \
+            > diagnostics/dependencies-minimalDebug.txt
+
+          stale="$(grep -c ' FAILED$' diagnostics/dependencies-minimalDebug.txt || true)"
+          leakcanary="$(grep -ci leakcanary diagnostics/dependencies-minimalDebug.txt || true)"
           {
-            echo "Lock state resolved successfully for minimalDebugRuntimeClasspath."
-            echo "LeakCanary entries in the resolved runtime classpath (expected: none):"
-            grep -ci leakcanary diagnostics/dependencies-minimalDebug.txt || true
+            echo "unresolved entries in minimalDebugRuntimeClasspath (expected 0): $stale"
+            echo "LeakCanary entries in minimalDebugRuntimeClasspath (expected 0): $leakcanary"
           } | tee diagnostics/lock-state.txt
+
+          if [ "$stale" -ne 0 ]; then
+            echo "::error::The dependency lock state no longer matches the declared graph."
+            grep ' FAILED$' diagnostics/dependencies-minimalDebug.txt
+            echo "Re-resolve with --write-locks; do not edit or delete gradle.lockfile by hand."
+            exit 1
+          fi
+          if [ "$leakcanary" -ne 0 ]; then
+            echo "::error::LeakCanary is still on the minimal debug runtime classpath."
+            exit 1
+          fi
 
       - name: Run unit tests of the endpoint resolver
         shell: bash
