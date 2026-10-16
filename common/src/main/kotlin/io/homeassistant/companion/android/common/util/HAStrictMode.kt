@@ -38,10 +38,21 @@ object HAStrictMode {
                 .detectUnsafeIntentLaunch()
                 .detectLeakedRegistrationObjects()
                 .penaltyListener(Executors.newSingleThreadExecutor()) { violation ->
-                    if (!vmPolicyIgnoredViolationRules.any { it.shouldIgnore(violation) }) {
+                    val matched = vmPolicyIgnoredViolationRules.filter { it.shouldIgnore(violation) }
+                    if (matched.isEmpty()) {
+                        Timber.e(
+                            "StrictModeDiag: FATAL VM violation %s on thread %s (no rule matched) — entering FailFast",
+                            violation.javaClass.simpleName,
+                            Thread.currentThread().name,
+                        )
                         FailFast.failWith(violation)
                     } else {
-                        Timber.w(violation, "Ignoring unexpected violation ($violation)")
+                        Timber.w(
+                            "StrictModeDiag: ignored VM violation %s on thread %s via rule %s",
+                            violation.javaClass.simpleName,
+                            Thread.currentThread().name,
+                            matched.first()::class.java.simpleName,
+                        )
                     }
                 }
                 .build(),
@@ -51,10 +62,21 @@ object HAStrictMode {
             StrictMode.ThreadPolicy.Builder()
                 .detectAll()
                 .penaltyListener(Executors.newSingleThreadExecutor()) { violation ->
-                    if (!threadPolicyIgnoredViolationRules.any { it.shouldIgnore(violation) }) {
+                    val matched = threadPolicyIgnoredViolationRules.filter { it.shouldIgnore(violation) }
+                    if (matched.isEmpty()) {
+                        Timber.e(
+                            "StrictModeDiag: FATAL thread violation %s on thread %s (no rule matched) — entering FailFast",
+                            violation.javaClass.simpleName,
+                            Thread.currentThread().name,
+                        )
                         FailFast.failWith(violation)
                     } else {
-                        Timber.w(violation, "Ignoring unexpected violation ($violation)")
+                        Timber.w(
+                            "StrictModeDiag: ignored thread violation %s on thread %s via rule %s",
+                            violation.javaClass.simpleName,
+                            Thread.currentThread().name,
+                            matched.first()::class.java.simpleName,
+                        )
                     }
                 }
                 .build(),

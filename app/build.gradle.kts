@@ -32,6 +32,18 @@ android {
                 }
             }
         }
+
+        // Arm64-only debug variant for on-device testing on arm64 phones (e.g. Redmi K70 Ultra).
+        // The default `minimalDebug` build stays universal (all 4 ABIs) and is untouched;
+        // this variant only drops the other ABIs to keep the test APK small
+        // (libmicrowakeword.so + libcronet account for ~78 MB across 4 ABIs).
+        create("debugArm64") {
+            initWith(getByName("debug"))
+            matchingFallbacks += listOf("debug")
+            ndk {
+                abiFilters += listOf("arm64-v8a")
+            }
+        }
     }
 
     lint {
