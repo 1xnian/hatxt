@@ -371,30 +371,67 @@ open class HomeAssistantApplication : Application() {
         )
 
         if (!isAutomotive()) {
-            // Update widgets when the screen turns on, updates are skipped if widgets were not added
-            val buttonWidget = ButtonWidget()
-            val entityWidget = EntityWidget()
-            val mediaPlayerWidget = MediaPlayerControlsWidget()
-            val templateWidget = TemplateWidget()
-            TodoWidget().register(this@HomeAssistantApplication)
+            // Update widgets when the screen turns on, updates are skipped if widgets were not added.
+            //
+            // Deferred until the first activity has been resumed. `onCreate` already registers a
+            // couple of dozen receivers on the main thread, and these four only matter once the
+            // user can actually see a widget on the home screen. Moving them off the startup path
+            // shortens the window between `am_proc_start` and the first drawn frame, which is the
+            // measurement that matters for perceived launch time. Nothing depends on the widgets
+            // being registered before the first activity is up: widget updates are driven by
+            // `ACTION_SCREEN_ON` / `ACTION_SCREEN_OFF` and by explicit broadcasts.
+            registerActivityLifecycleCallbacks(
+                object : Application.ActivityLifecycleCallbacks {
+                    private var registered = false
 
-            val screenIntentFilter = IntentFilter()
-            screenIntentFilter.addAction(Intent.ACTION_SCREEN_ON)
-            screenIntentFilter.addAction(Intent.ACTION_SCREEN_OFF)
+                    override fun onActivityResumed(activity: Activity) {
+                        if (registered) return
+                        registered = true
+                        unregisterActivityLifecycleCallbacks(this)
 
-            ContextCompat.registerReceiver(this, buttonWidget, screenIntentFilter, ContextCompat.RECEIVER_NOT_EXPORTED)
-            ContextCompat.registerReceiver(this, entityWidget, screenIntentFilter, ContextCompat.RECEIVER_NOT_EXPORTED)
-            ContextCompat.registerReceiver(
-                this,
-                mediaPlayerWidget,
-                screenIntentFilter,
-                ContextCompat.RECEIVER_NOT_EXPORTED,
-            )
-            ContextCompat.registerReceiver(
-                this,
-                templateWidget,
-                screenIntentFilter,
-                ContextCompat.RECEIVER_NOT_EXPORTED,
+                        val buttonWidget = ButtonWidget()
+                        val entityWidget = EntityWidget()
+                        val mediaPlayerWidget = MediaPlayerControlsWidget()
+                        val templateWidget = TemplateWidget()
+                        TodoWidget().register(this@HomeAssistantApplication)
+
+                        val screenIntentFilter = IntentFilter()
+                        screenIntentFilter.addAction(Intent.ACTION_SCREEN_ON)
+                        screenIntentFilter.addAction(Intent.ACTION_SCREEN_OFF)
+
+                        ContextCompat.registerReceiver(
+                            this@HomeAssistantApplication,
+                            buttonWidget,
+                            screenIntentFilter,
+                            ContextCompat.RECEIVER_NOT_EXPORTED,
+                        )
+                        ContextCompat.registerReceiver(
+                            this@HomeAssistantApplication,
+                            entityWidget,
+                            screenIntentFilter,
+                            ContextCompat.RECEIVER_NOT_EXPORTED,
+                        )
+                        ContextCompat.registerReceiver(
+                            this@HomeAssistantApplication,
+                            mediaPlayerWidget,
+                            screenIntentFilter,
+                            ContextCompat.RECEIVER_NOT_EXPORTED,
+                        )
+                        ContextCompat.registerReceiver(
+                            this@HomeAssistantApplication,
+                            templateWidget,
+                            screenIntentFilter,
+                            ContextCompat.RECEIVER_NOT_EXPORTED,
+                        )
+                    }
+
+                    override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+                    override fun onActivityStarted(activity: Activity) = Unit
+                    override fun onActivityPaused(activity: Activity) = Unit
+                    override fun onActivityStopped(activity: Activity) = Unit
+                    override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+                    override fun onActivityDestroyed(activity: Activity) = Unit
+                },
             )
         }
     }
