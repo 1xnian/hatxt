@@ -1,6 +1,6 @@
 # HA Android 动态地址（TXT/SRV）APK 静态检查报告
 
-- 生成时间 (UTC)：2026-10-16T07:05:39Z
+- 生成时间 (UTC)：2026-10-16T13:08:38Z
 - 提交：`local`
 - 工作流运行：`local`
 - 运行器：`local` / `openjdk version "21.0.8" 2025-07-15 LTS`
@@ -10,7 +10,7 @@
 ## 1. 构建产物
 
 ```text
-app/build/outputs/apk/minimal/debug/app-minimal-debug.apk (75670931 bytes)
+app/build/outputs/apk/minimal/debug/app-minimal-debug.apk (78817432 bytes)
 app/build/outputs/apk/minimal/debug/output-metadata.json (464 bytes)
 ```
 
@@ -45,6 +45,7 @@ build-logic/convention/src/main/kotlin/AndroidApplicationDependenciesConventionP
 
 ```text
 -- 主实现 --
+common/src/main/kotlin/io/homeassistant/companion/android/common/data/endpoint/DnsMessageCodec.kt
 common/src/main/kotlin/io/homeassistant/companion/android/common/data/endpoint/DohDnsClient.kt
 common/src/main/kotlin/io/homeassistant/companion/android/common/data/endpoint/EndpointConnectGate.kt
 common/src/main/kotlin/io/homeassistant/companion/android/common/data/endpoint/EndpointForegroundRefresher.kt
@@ -58,30 +59,36 @@ common/src/main/kotlin/io/homeassistant/companion/android/common/data/endpoint/E
 common/src/main/kotlin/io/homeassistant/companion/android/common/data/endpoint/EndpointSettingsStore.kt
 common/src/main/kotlin/io/homeassistant/companion/android/common/data/endpoint/EndpointStateMachine.kt
 common/src/main/kotlin/io/homeassistant/companion/android/common/data/endpoint/EndpointUrlFactory.kt
+common/src/main/kotlin/io/homeassistant/companion/android/common/data/endpoint/FallbackDnsClient.kt
 common/src/main/kotlin/io/homeassistant/companion/android/common/data/endpoint/HttpsFallbackPolicy.kt
 common/src/main/kotlin/io/homeassistant/companion/android/common/data/endpoint/OkHttpEndpointProbe.kt
+common/src/main/kotlin/io/homeassistant/companion/android/common/data/endpoint/RawUdpDnsClient.kt
 common/src/main/kotlin/io/homeassistant/companion/android/common/data/endpoint/ServerUrlSynchronizer.kt
 common/src/main/kotlin/io/homeassistant/companion/android/common/data/endpoint/SrvRecordInterpreter.kt
+common/src/main/kotlin/io/homeassistant/companion/android/common/data/endpoint/SystemDnsClient.kt
 common/src/main/kotlin/io/homeassistant/companion/android/common/data/endpoint/TxtRecordInterpreter.kt
 -- 单元测试 --
+common/src/test/kotlin/io/homeassistant/companion/android/common/data/endpoint/DnsMessageCodecTest.kt
 common/src/test/kotlin/io/homeassistant/companion/android/common/data/endpoint/DohResponseParserTest.kt
 common/src/test/kotlin/io/homeassistant/companion/android/common/data/endpoint/EndpointConnectGateTest.kt
 common/src/test/kotlin/io/homeassistant/companion/android/common/data/endpoint/EndpointRefreshPolicyTest.kt
 common/src/test/kotlin/io/homeassistant/companion/android/common/data/endpoint/EndpointResolverTest.kt
 common/src/test/kotlin/io/homeassistant/companion/android/common/data/endpoint/EndpointStateMachineTest.kt
 common/src/test/kotlin/io/homeassistant/companion/android/common/data/endpoint/EndpointUrlFactoryTest.kt
+common/src/test/kotlin/io/homeassistant/companion/android/common/data/endpoint/FallbackDnsClientTest.kt
 common/src/test/kotlin/io/homeassistant/companion/android/common/data/endpoint/HttpsFallbackPolicyTest.kt
+common/src/test/kotlin/io/homeassistant/companion/android/common/data/endpoint/RealDnsLookupTest.kt
 common/src/test/kotlin/io/homeassistant/companion/android/common/data/endpoint/SrvRecordInterpreterTest.kt
 common/src/test/kotlin/io/homeassistant/companion/android/common/data/endpoint/TxtRecordInterpreterTest.kt
--- 统计：18 个实现文件，9 个测试文件
+-- 统计：22 个实现文件，12 个测试文件
 ```
 
 ## 5. APK 摘要
 
 ```text
 路径：app/build/outputs/apk/minimal/debug/app-minimal-debug.apk
-大小：75670931 bytes
-SHA-256：12407d556823364cb83580c8b6331025ec4ddb6ecd8bf32f117025dba10c4d15
+大小：78817432 bytes
+SHA-256：93211eb7deebe2778286af5442b20b95f29c9471045d3839cf14b4561abc218b
 ```
 
 ## 6. 包名 / 标签 / 启动 Activity（badging）
@@ -329,7 +336,7 @@ native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'
       E: activity (line=254)
         A: android:name(0x01010003)="io.homeassistant.companion.android.HiltComponentActivity" (Raw: "io.homeassistant.companion.android.HiltComponentActivity")
       E: activity (line=259)
-        A: android:label(0x01010001)=@0x7f1206a2
+        A: android:label(0x01010001)=@0x7f1206a5
         A: android:name(0x01010003)="io.homeassistant.companion.android.nfc.TagReaderActivity" (Raw: "io.homeassistant.companion.android.nfc.TagReaderActivity")
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=267)
@@ -398,7 +405,7 @@ native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'
             A: android:name(0x01010003)="android.bluetooth.device.action.ACL_DISCONNECTED" (Raw: "android.bluetooth.device.action.ACL_DISCONNECTED")
           E: action (line=336)
             A: android:name(0x01010003)="io.homeassistant.companion.android.UPDATE_SENSORS" (Raw: "io.homeassistant.companion.android.UPDATE_SENSORS")
-        A: android:label(0x01010001)=@0x7f120773
+        A: android:label(0x01010001)=@0x7f120776
         A: android:name(0x01010003)="io.homeassistant.companion.android.widgets.button.ButtonWidget" (Raw: "io.homeassistant.companion.android.widgets.button.ButtonWidget")
         A: android:exported(0x01010010)=(type 0x12)0x0
         E: intent-filter (line=343)
@@ -409,7 +416,7 @@ native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'
           E: action (line=346)
             A: android:name(0x01010003)="io.homeassistant.companion.android.widgets.ButtonWidget.CALL_SERVICE_AUTH" (Raw: "io.homeassistant.companion.android.widgets.ButtonWidget.CALL_SERVICE_AUTH")
           A: android:name(0x01010003)="android.appwidget.provider" (Raw: "android.appwidget.provider")
-        A: android:label(0x01010001)=@0x7f120775
+        A: android:label(0x01010001)=@0x7f120778
         A: android:name(0x01010003)="io.homeassistant.companion.android.widgets.camera.CameraWidget" (Raw: "io.homeassistant.companion.android.widgets.camera.CameraWidget")
         A: android:exported(0x01010010)=(type 0x12)0x0
         E: intent-filter (line=357)
@@ -418,21 +425,21 @@ native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'
           E: action (line=359)
             A: android:name(0x01010003)="io.homeassistant.companion.android.widgets.camera.CameraWidget.UPDATE_IMAGE" (Raw: "io.homeassistant.companion.android.widgets.camera.CameraWidget.UPDATE_IMAGE")
           A: android:name(0x01010003)="android.appwidget.provider" (Raw: "android.appwidget.provider")
-        A: android:label(0x01010001)=@0x7f120792
+        A: android:label(0x01010001)=@0x7f120795
         A: android:name(0x01010003)="io.homeassistant.companion.android.widgets.entity.EntityWidget" (Raw: "io.homeassistant.companion.android.widgets.entity.EntityWidget")
         A: android:exported(0x01010010)=(type 0x12)0x0
         E: intent-filter (line=370)
           E: action (line=371)
             A: android:name(0x01010003)="android.appwidget.action.APPWIDGET_UPDATE" (Raw: "android.appwidget.action.APPWIDGET_UPDATE")
           A: android:name(0x01010003)="android.appwidget.provider" (Raw: "android.appwidget.provider")
-        A: android:label(0x01010001)=@0x7f1207a2
+        A: android:label(0x01010001)=@0x7f1207a5
         A: android:name(0x01010003)="io.homeassistant.companion.android.widgets.todo.TodoWidget" (Raw: "io.homeassistant.companion.android.widgets.todo.TodoWidget")
         A: android:exported(0x01010010)=(type 0x12)0x0
         E: intent-filter (line=382)
           E: action (line=383)
             A: android:name(0x01010003)="android.appwidget.action.APPWIDGET_UPDATE" (Raw: "android.appwidget.action.APPWIDGET_UPDATE")
           A: android:name(0x01010003)="android.appwidget.provider" (Raw: "android.appwidget.provider")
-        A: android:label(0x01010001)=@0x7f120783
+        A: android:label(0x01010001)=@0x7f120786
         A: android:name(0x01010003)="io.homeassistant.companion.android.widgets.mediaplayer.MediaPlayerControlsWidget" (Raw: "io.homeassistant.companion.android.widgets.mediaplayer.MediaPlayerControlsWidget")
         A: android:exported(0x01010010)=(type 0x12)0x0
         E: intent-filter (line=394)
@@ -451,7 +458,7 @@ native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'
           E: action (line=401)
             A: android:name(0x01010003)="io.homeassistant.companion.android.widgets.media_player_controls.MediaPlayerControlsWidget.CALL_NEXT_TRACK" (Raw: "io.homeassistant.companion.android.widgets.media_player_controls.MediaPlayerControlsWidget.CALL_NEXT_TRACK")
           A: android:name(0x01010003)="android.appwidget.provider" (Raw: "android.appwidget.provider")
-        A: android:label(0x01010001)=@0x7f1206b4
+        A: android:label(0x01010001)=@0x7f1206b7
         A: android:name(0x01010003)="io.homeassistant.companion.android.widgets.template.TemplateWidget" (Raw: "io.homeassistant.companion.android.widgets.template.TemplateWidget")
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=412)
@@ -612,7 +619,7 @@ native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'
         A: android:name(0x01010003)="io.homeassistant.companion.android.settings.SettingsActivity" (Raw: "io.homeassistant.companion.android.settings.SettingsActivity")
         A: android:exported(0x01010010)=(type 0x12)0x0
       E: activity (line=655)
-        A: android:label(0x01010001)=@0x7f120437
+        A: android:label(0x01010001)=@0x7f12043a
         A: android:name(0x01010003)="io.homeassistant.companion.android.nfc.NfcSetupActivity" (Raw: "io.homeassistant.companion.android.nfc.NfcSetupActivity")
         A: android:exported(0x01010010)=(type 0x12)0x0
       E: activity (line=660)
@@ -671,268 +678,268 @@ native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'
         E: intent-filter (line=755)
           E: action (line=756)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE_PREFERENCES" (Raw: "android.service.quicksettings.action.QS_TILE_PREFERENCES")
-        A: android:label(0x01010001)=@0x7f1206d8
+        A: android:label(0x01010001)=@0x7f1206db
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile1Service" (Raw: "io.homeassistant.companion.android.qs.Tile1Service")
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=766)
           E: action (line=767)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206e3
+        A: android:label(0x01010001)=@0x7f1206e6
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile2Service" (Raw: "io.homeassistant.companion.android.qs.Tile2Service")
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=776)
           E: action (line=777)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206ee
+        A: android:label(0x01010001)=@0x7f1206f1
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile3Service" (Raw: "io.homeassistant.companion.android.qs.Tile3Service")
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=786)
           E: action (line=787)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206f9
+        A: android:label(0x01010001)=@0x7f1206fc
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile4Service" (Raw: "io.homeassistant.companion.android.qs.Tile4Service")
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=796)
           E: action (line=797)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206fb
+        A: android:label(0x01010001)=@0x7f1206fe
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile5Service" (Raw: "io.homeassistant.companion.android.qs.Tile5Service")
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=806)
           E: action (line=807)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206fc
+        A: android:label(0x01010001)=@0x7f1206ff
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile6Service" (Raw: "io.homeassistant.companion.android.qs.Tile6Service")
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=816)
           E: action (line=817)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206fd
+        A: android:label(0x01010001)=@0x7f120700
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile7Service" (Raw: "io.homeassistant.companion.android.qs.Tile7Service")
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=826)
           E: action (line=827)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206fe
+        A: android:label(0x01010001)=@0x7f120701
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile8Service" (Raw: "io.homeassistant.companion.android.qs.Tile8Service")
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=836)
           E: action (line=837)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206ff
+        A: android:label(0x01010001)=@0x7f120702
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile9Service" (Raw: "io.homeassistant.companion.android.qs.Tile9Service")
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=846)
           E: action (line=847)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206d9
+        A: android:label(0x01010001)=@0x7f1206dc
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile10Service" (Raw: "io.homeassistant.companion.android.qs.Tile10Service")
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=856)
           E: action (line=857)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206da
+        A: android:label(0x01010001)=@0x7f1206dd
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile11Service" (Raw: "io.homeassistant.companion.android.qs.Tile11Service")
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=866)
           E: action (line=867)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206db
+        A: android:label(0x01010001)=@0x7f1206de
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile12Service" (Raw: "io.homeassistant.companion.android.qs.Tile12Service")
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=876)
           E: action (line=877)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206dc
+        A: android:label(0x01010001)=@0x7f1206df
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile13Service" (Raw: "io.homeassistant.companion.android.qs.Tile13Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=887)
           E: action (line=888)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206dd
+        A: android:label(0x01010001)=@0x7f1206e0
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile14Service" (Raw: "io.homeassistant.companion.android.qs.Tile14Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=898)
           E: action (line=899)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206de
+        A: android:label(0x01010001)=@0x7f1206e1
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile15Service" (Raw: "io.homeassistant.companion.android.qs.Tile15Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=909)
           E: action (line=910)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206df
+        A: android:label(0x01010001)=@0x7f1206e2
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile16Service" (Raw: "io.homeassistant.companion.android.qs.Tile16Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=920)
           E: action (line=921)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206e0
+        A: android:label(0x01010001)=@0x7f1206e3
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile17Service" (Raw: "io.homeassistant.companion.android.qs.Tile17Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=931)
           E: action (line=932)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206e1
+        A: android:label(0x01010001)=@0x7f1206e4
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile18Service" (Raw: "io.homeassistant.companion.android.qs.Tile18Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=942)
           E: action (line=943)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206e2
+        A: android:label(0x01010001)=@0x7f1206e5
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile19Service" (Raw: "io.homeassistant.companion.android.qs.Tile19Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=953)
           E: action (line=954)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206e4
+        A: android:label(0x01010001)=@0x7f1206e7
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile20Service" (Raw: "io.homeassistant.companion.android.qs.Tile20Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=964)
           E: action (line=965)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206e5
+        A: android:label(0x01010001)=@0x7f1206e8
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile21Service" (Raw: "io.homeassistant.companion.android.qs.Tile21Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=975)
           E: action (line=976)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206e6
+        A: android:label(0x01010001)=@0x7f1206e9
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile22Service" (Raw: "io.homeassistant.companion.android.qs.Tile22Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=986)
           E: action (line=987)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206e7
+        A: android:label(0x01010001)=@0x7f1206ea
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile23Service" (Raw: "io.homeassistant.companion.android.qs.Tile23Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=997)
           E: action (line=998)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206e8
+        A: android:label(0x01010001)=@0x7f1206eb
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile24Service" (Raw: "io.homeassistant.companion.android.qs.Tile24Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=1008)
           E: action (line=1009)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206e9
+        A: android:label(0x01010001)=@0x7f1206ec
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile25Service" (Raw: "io.homeassistant.companion.android.qs.Tile25Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=1019)
           E: action (line=1020)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206ea
+        A: android:label(0x01010001)=@0x7f1206ed
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile26Service" (Raw: "io.homeassistant.companion.android.qs.Tile26Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=1030)
           E: action (line=1031)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206eb
+        A: android:label(0x01010001)=@0x7f1206ee
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile27Service" (Raw: "io.homeassistant.companion.android.qs.Tile27Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=1041)
           E: action (line=1042)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206ec
+        A: android:label(0x01010001)=@0x7f1206ef
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile28Service" (Raw: "io.homeassistant.companion.android.qs.Tile28Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=1052)
           E: action (line=1053)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206ed
+        A: android:label(0x01010001)=@0x7f1206f0
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile29Service" (Raw: "io.homeassistant.companion.android.qs.Tile29Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=1063)
           E: action (line=1064)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206ef
+        A: android:label(0x01010001)=@0x7f1206f2
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile30Service" (Raw: "io.homeassistant.companion.android.qs.Tile30Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=1074)
           E: action (line=1075)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206f0
+        A: android:label(0x01010001)=@0x7f1206f3
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile31Service" (Raw: "io.homeassistant.companion.android.qs.Tile31Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=1085)
           E: action (line=1086)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206f1
+        A: android:label(0x01010001)=@0x7f1206f4
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile32Service" (Raw: "io.homeassistant.companion.android.qs.Tile32Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=1096)
           E: action (line=1097)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206f2
+        A: android:label(0x01010001)=@0x7f1206f5
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile33Service" (Raw: "io.homeassistant.companion.android.qs.Tile33Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=1107)
           E: action (line=1108)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206f3
+        A: android:label(0x01010001)=@0x7f1206f6
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile34Service" (Raw: "io.homeassistant.companion.android.qs.Tile34Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=1118)
           E: action (line=1119)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206f4
+        A: android:label(0x01010001)=@0x7f1206f7
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile35Service" (Raw: "io.homeassistant.companion.android.qs.Tile35Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=1129)
           E: action (line=1130)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206f5
+        A: android:label(0x01010001)=@0x7f1206f8
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile36Service" (Raw: "io.homeassistant.companion.android.qs.Tile36Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=1140)
           E: action (line=1141)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206f6
+        A: android:label(0x01010001)=@0x7f1206f9
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile37Service" (Raw: "io.homeassistant.companion.android.qs.Tile37Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=1151)
           E: action (line=1152)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206f7
+        A: android:label(0x01010001)=@0x7f1206fa
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile38Service" (Raw: "io.homeassistant.companion.android.qs.Tile38Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=1162)
           E: action (line=1163)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206f8
+        A: android:label(0x01010001)=@0x7f1206fb
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile39Service" (Raw: "io.homeassistant.companion.android.qs.Tile39Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
         E: intent-filter (line=1173)
           E: action (line=1174)
             A: android:name(0x01010003)="android.service.quicksettings.action.QS_TILE" (Raw: "android.service.quicksettings.action.QS_TILE")
-        A: android:label(0x01010001)=@0x7f1206fa
+        A: android:label(0x01010001)=@0x7f1206fd
         A: android:name(0x01010003)="io.homeassistant.companion.android.qs.Tile40Service" (Raw: "io.homeassistant.companion.android.qs.Tile40Service")
         A: android:enabled(0x0101000e)=(type 0x12)0x0
         A: android:exported(0x01010010)=(type 0x12)0xffffffff
@@ -1095,26 +1102,26 @@ classes11.dex: 0 处 endpoint 包引用
 classes12.dex: 0 处 endpoint 包引用
 classes13.dex: 0 处 endpoint 包引用
 classes14.dex: 40 处 endpoint 包引用
-classes15.dex: 17 处 endpoint 包引用
 classes16.dex: 0 处 endpoint 包引用
 classes17.dex: 0 处 endpoint 包引用
 classes18.dex: 0 处 endpoint 包引用
 classes19.dex: 0 处 endpoint 包引用
-classes2.dex: 261 处 endpoint 包引用
 classes20.dex: 0 处 endpoint 包引用
 classes21.dex: 0 处 endpoint 包引用
 classes22.dex: 0 处 endpoint 包引用
 classes23.dex: 0 处 endpoint 包引用
 classes24.dex: 0 处 endpoint 包引用
 classes25.dex: 0 处 endpoint 包引用
-classes3.dex: 0 处 endpoint 包引用
 classes4.dex: 0 处 endpoint 包引用
 classes5.dex: 0 处 endpoint 包引用
 classes6.dex: 0 处 endpoint 包引用
-classes8.dex: 14 处 endpoint 包引用
 classes9.dex: 0 处 endpoint 包引用
+classes15.dex: 17 处 endpoint 包引用
+classes2.dex: 327 处 endpoint 包引用
+classes3.dex: 0 处 endpoint 包引用
+classes8.dex: 14 处 endpoint 包引用
 classes7.dex: 0 处 endpoint 包引用
-合计：332
+合计：398
 ```
 
 ## 10. 入口数量核对
