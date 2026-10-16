@@ -26,7 +26,8 @@ val threadPolicyIgnoredViolationRules = listOf(
     IgnoreAndroidAutoRendererServiceDiskRead,
     IgnoreMiuiFontSettingsDiskRead,
     IgnoreMiuiTurboSchedMonitorDiskRead,
-    IgnoreMediatekBoostFwkDiskRead,
+    IgnoreMiuiEnterpriseFrameworkDiskRead,
+    IgnoreMediatekBoostFwkDiskReadWrite,
     IgnoreChromiumKeyStoreDiskWrite,
     IgnoreAppCompatPersistLocalesDiskReadWrite,
 )
@@ -311,35 +312,77 @@ private data object IgnoreAppCompatPersistLocalesDiskReadWrite : IgnoreViolation
 }
 
 /**
- * Ignore a [DiskReadViolation] in MediaTek's boost framework (`com.mediatek.boostfwk`).
+ * Ignore a [DiskReadViolation] in MIUI's enterprise management framework (`miui.enterprise`).
  *
- * On MediaTek devices (observed on a Redmi K70 Ultra / HyperOS, `com.mediatek.boostfwk`),
- * the vendor's performance framework inspects the app from inside the touch-event pipeline:
+ * On MIUI / HyperOS, `NotificationManager.notifyAsUser()` initialises
+ * `miui.enterprise.ApplicationHelperStub`, whose static singleton holder asks
+ * `miui.enterprise.EpFrameworkFactory` to probe for the enterprise jar. That probe is a plain
+ * `File.exists()` and it runs on the calling thread, which for a notification is the app's main
+ * thread:
  *
  * ```text
  * android.os.strictmode.DiskReadViolation
  *   java.io.File.exists()
- *   com.mediatek.boostfwk.utils.Util.isGameApp()
+ *   miui.enterprise.EpFrameworkFactory.isEnterpriseJarExists(EpFrameworkFactory.java:58)
+ *   miui.enterprise.ApplicationHelperStub$SingletonHolder.<clinit>(ApplicationHelperStub.java:22)
+ *   miui.enterprise.ApplicationHelperStub.getInstance(ApplicationHelperStub.java:26)
+ *   android.app.NotificationManager.notifyAsUser(NotificationManager.java:699)
+ *   androidx.work.impl.foreground.SystemForegroundService.notify(SystemForegroundService.java:155)
+ * ```
+ *
+ * Every app that posts a notification hits this, and the probe lives entirely in vendor code the app
+ * cannot control or replace. Without an exemption the very first notification — here WorkManager's
+ * [androidx.work.impl.foreground.SystemForegroundService] — was fatal at startup, so the process
+ * died, was restarted by the system, died again, and the user saw an immediate crash loop.
+ *
+ * The rule is deliberately scoped to [DiskReadViolation] and to the `miui.enterprise.` prefix: a
+ * disk write from that framework, or a disk read from any other package (including the app itself),
+ * is still fatal.
+ */
+private data object IgnoreMiuiEnterpriseFrameworkDiskRead : IgnoreViolationRule {
+    @RequiresApi(Build.VERSION_CODES.P)
+    override fun shouldIgnore(violation: Violation): Boolean {
+        if (violation !is DiskReadViolation) return false
+
+        return violation.stackTrace.any {
+            it.className.startsWith("miui.enterprise.")
+        }
+    }
+}
+
+/**
+ * Ignore a [DiskReadViolation] or a [DiskWriteViolation] in MediaTek's boost framework
+ * (`com.mediatek.boostfwk`).
+ *
+ * On MediaTek devices (observed on a Redmi K70 Ultra / HyperOS), the vendor's performance framework
+ * inspects the app from inside the touch-event pipeline. Its `isGameApp()` / `isFlutterApp()` probes
+ * call `File.exists()` (a disk read) and, when the code cache directory does not exist yet,
+ * `Context.getCodeCacheDir()` → `mkdir()` (a disk write):
+ *
+ * ```text
+ * android.os.strictmode.DiskReadViolation           | android.os.strictmode.DiskWriteViolation
+ *   java.io.File.exists()                           |   libcore.io.BlockGuardOs.mkdir()
+ *   com.mediatek.boostfwk.utils.Util.isGameApp()    |   android.app.ContextImpl.getCodeCacheDir()
  *   com.mediatek.boostfwk.identify.scroll.ScrollIdentify.checkAppType()
  *   com.mediatek.boostfwk.BoostModuleDispatcher...
  *   android.view.ViewRootImpl$ViewPostImeInputStage.processPointerEvent()
  * ```
  *
- * The vendor code runs on the app's main thread during
+ * Both halves run on the app's main thread during
  * [android.view.ViewRootImpl.ViewPostImeInputStage.processPointerEvent], so the StrictMode thread
- * policy propagates into it and the `File.exists()` probe is reported back to the app even though
- * it happens inside a vendor component that the app cannot control or replace. Because the policy
- * is `detectAll()` and unmatched violations are fatal (`FailFast`), this killed the process on the
- * first touch of any screen.
+ * policy propagates into the vendor component and the violation is reported back to the app even
+ * though the app cannot control or replace that code. Because the policy is `detectAll()` and
+ * unmatched violations are fatal (`FailFast`), the write half — which the previous read-only rule
+ * did not cover — killed the process on the first touch of any screen.
  *
  * The match is keyed on the vendor package prefix so every boostfwk module (`utils`, `identify`,
- * `BoostModuleDispatcher`, ...) is covered, while a disk read whose stack contains no boostfwk
+ * `BoostModuleDispatcher`, ...) is covered, while a read or write whose stack contains no boostfwk
  * frame is still fatal.
  */
-private data object IgnoreMediatekBoostFwkDiskRead : IgnoreViolationRule {
+private data object IgnoreMediatekBoostFwkDiskReadWrite : IgnoreViolationRule {
     @RequiresApi(Build.VERSION_CODES.P)
     override fun shouldIgnore(violation: Violation): Boolean {
-        if (violation !is DiskReadViolation) return false
+        if (violation !is DiskReadViolation && violation !is DiskWriteViolation) return false
 
         return violation.stackTrace.any {
             it.className.startsWith("com.mediatek.boostfwk.")

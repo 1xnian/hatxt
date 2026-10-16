@@ -1,6 +1,7 @@
 package io.homeassistant.companion.android.util
 
 import android.os.strictmode.DiskReadViolation
+import android.os.strictmode.DiskWriteViolation
 import android.os.strictmode.Violation
 import io.mockk.every
 import io.mockk.mockk
@@ -13,15 +14,22 @@ import org.junit.jupiter.api.Test
  * Guards the StrictMode ignore rules that keep [io.homeassistant.companion.android.common.util.HAStrictMode]
  * from being fatal for violations the app cannot control.
  *
- * The MediaTek case is a regression test for a real crash: on a Redmi K70 Ultra the vendor boost
- * framework read the disk on the main thread from inside the touch-event pipeline, no rule matched,
- * and `FailFast` exited the process (`System.exit called, status: 1`). The frames below are the
- * ones captured in the device logcat.
+ * Every stack used below is a verbatim copy of a frame list captured on the Redmi K70 Ultra
+ * (HyperOS / Android 14) in `ha-crash2.txt`; nothing here is invented. Two separate real crashes
+ * are covered:
+ *
+ * * the MediaTek boost framework, which reads the disk (`File.exists()`) **and** writes it
+ *   (`Context.getCodeCacheDir()` → `mkdir()`) from the touch-event pipeline — the write half used
+ *   to be fatal because the rule only matched [DiskReadViolation];
+ * * the MIUI enterprise framework, which reads the disk (`File.exists()`) while
+ *   `NotificationManager.notifyAsUser()` initialises it, i.e. on the very first notification.
+ *
+ * Both hit `FailFast` → `exitProcess(1)` (`System.exit called, status: 1`) because no rule matched.
  */
 class IgnoreViolationRulesTest {
 
-    /** Frames of the fatal `DiskReadViolation` from the Redmi K70 Ultra logcat. */
-    private val mediatekBoostFwkTouchViolation = diskReadViolation(
+    /** Frames of the `DiskReadViolation` raised by the boost framework inside the touch pipeline. */
+    private val mediatekBoostFwkTouchDiskRead = diskReadViolation(
         StackTraceElement("java.io.File", "exists", "File.java", -2),
         StackTraceElement("com.mediatek.boostfwk.utils.Util", "isGameApp", "Util.java", -2),
         StackTraceElement(
@@ -44,6 +52,192 @@ class IgnoreViolationRulesTest {
         ),
     )
 
+    /**
+     * Frames of the `DiskWriteViolation` from the very same `getCodeCacheDir()` call: the read above
+     * probed with `File.exists()`, this one created the directory with `mkdir()`. It was fatal.
+     */
+    private val mediatekBoostFwkTouchDiskWrite = diskWriteViolation(
+        StackTraceElement("libcore.io.BlockGuardOs", "mkdir", "BlockGuardOs.java", -2),
+        StackTraceElement("android.system.Os", "mkdir", "Os.java", -2),
+        StackTraceElement("android.app.ContextImpl", "ensurePrivateDirExists", "ContextImpl.java", -2),
+        StackTraceElement("android.app.ContextImpl", "getCodeCacheDir", "ContextImpl.java", -2),
+        StackTraceElement("android.content.ContextWrapper", "getCodeCacheDir", "ContextWrapper.java", -2),
+        StackTraceElement("com.mediatek.boostfwk.utils.TasksUtil", "isFlutterApp", "TasksUtil.java", -2),
+        StackTraceElement(
+            "com.mediatek.boostfwk.info.ActivityInfo",
+            "getPageType",
+            "ActivityInfo.java",
+            -2,
+        ),
+        StackTraceElement(
+            "com.mediatek.boostfwk.identify.scroll.ScrollIdentify\$ScrollGestureListener",
+            "onScroll",
+            "ScrollIdentify.java",
+            -2,
+        ),
+        StackTraceElement(
+            "android.view.ViewRootImpl\$ViewPostImeInputStage",
+            "processPointerEvent",
+            "ViewRootImpl.java",
+            -2,
+        ),
+    )
+
+    /**
+     * Frames of the `DiskReadViolation` raised by MIUI's enterprise framework while
+     * `NotificationManager.notifyAsUser()` initialises it. This is what killed the process on startup.
+     */
+    private val miuiEnterpriseFrameworkDiskRead = diskReadViolation(
+        StackTraceElement("java.io.File", "exists", "File.java", -2),
+        StackTraceElement(
+            "miui.enterprise.EpFrameworkFactory",
+            "isEnterpriseJarExists",
+            "EpFrameworkFactory.java",
+            -2,
+        ),
+        StackTraceElement("miui.enterprise.EpFrameworkFactory", "get", "EpFrameworkFactory.java", -2),
+        StackTraceElement(
+            "miui.enterprise.ApplicationHelperStub\$SingletonHolder",
+            "<clinit>",
+            "ApplicationHelperStub.java",
+            -2,
+        ),
+        StackTraceElement(
+            "miui.enterprise.ApplicationHelperStub",
+            "getInstance",
+            "ApplicationHelperStub.java",
+            -2,
+        ),
+        StackTraceElement(
+            "android.app.NotificationManager",
+            "notifyAsUser",
+            "NotificationManager.java",
+            -2,
+        ),
+        StackTraceElement(
+            "androidx.work.impl.foreground.SystemForegroundService",
+            "notify",
+            "SystemForegroundService.java",
+            -2,
+        ),
+    )
+
+    // region MediaTek boost framework
+
+    @Test
+    fun `Mediatek boost framework disk read is ignored`() {
+        assertTrue(
+            threadPolicyIgnoredViolationRules.any { it.shouldIgnore(mediatekBoostFwkTouchDiskRead) },
+            "The vendor boost framework disk read must not be fatal",
+        )
+    }
+
+    @Test
+    fun `Mediatek boost framework disk write is ignored`() {
+        assertTrue(
+            threadPolicyIgnoredViolationRules.any { it.shouldIgnore(mediatekBoostFwkTouchDiskWrite) },
+            "The vendor boost framework disk write must not be fatal",
+        )
+    }
+
+    @Test
+    fun `Exactly one rule covers the boost framework disk write`() {
+        val matching = threadPolicyIgnoredViolationRules.filter { it.shouldIgnore(mediatekBoostFwkTouchDiskWrite) }
+        assertEquals(1, matching.size, "Exactly one rule should match the boost framework disk write")
+    }
+
+    // endregion
+
+    // region MIUI enterprise framework
+
+    @Test
+    fun `MIUI enterprise framework disk read is ignored`() {
+        assertTrue(
+            threadPolicyIgnoredViolationRules.any { it.shouldIgnore(miuiEnterpriseFrameworkDiskRead) },
+            "The vendor enterprise framework disk read must not be fatal",
+        )
+    }
+
+    @Test
+    fun `MIUI enterprise framework disk write is still fatal`() {
+        val enterpriseDiskWrite = diskWriteViolation(
+            StackTraceElement("libcore.io.BlockGuardOs", "mkdir", "BlockGuardOs.java", -2),
+            StackTraceElement(
+                "miui.enterprise.EpFrameworkFactory",
+                "isEnterpriseJarExists",
+                "EpFrameworkFactory.java",
+                -2,
+            ),
+            StackTraceElement(
+                "android.app.NotificationManager",
+                "notifyAsUser",
+                "NotificationManager.java",
+                -2,
+            ),
+        )
+        assertFalse(
+            threadPolicyIgnoredViolationRules.any { it.shouldIgnore(enterpriseDiskWrite) },
+            "The MIUI enterprise rule must stay scoped to DiskReadViolation",
+        )
+    }
+
+    // endregion
+
+    // region The app's own code must stay fatal
+
+    @Test
+    fun `Disk read from the app's own code is still fatal`() {
+        assertFalse(
+            threadPolicyIgnoredViolationRules.any { it.shouldIgnore(appCodeDiskRead) },
+            "A disk read with no vendor frame must keep triggering FailFast",
+        )
+    }
+
+    @Test
+    fun `Disk write from the app's own code is still fatal`() {
+        assertFalse(
+            threadPolicyIgnoredViolationRules.any { it.shouldIgnore(appCodeDiskWrite) },
+            "A disk write with no vendor frame must keep triggering FailFast",
+        )
+    }
+
+    // endregion
+
+    // region Neither rule may widen beyond its own violation types
+
+    @Test
+    fun `Vendor rules do not ignore unrelated violation types`() {
+        val notADiskViolation = mockk<Violation>()
+        assertFalse(
+            threadPolicyIgnoredViolationRules.any { it.shouldIgnore(notADiskViolation) },
+            "The vendor rules must stay scoped to DiskRead/DiskWrite violations",
+        )
+    }
+
+    @Test
+    fun `Mediatek rule does not ignore a disk read from the MIUI enterprise framework`() {
+        val onlyMediatek = threadPolicyIgnoredViolationRules.filter {
+            it.shouldIgnore(miuiEnterpriseFrameworkDiskRead)
+        }
+        assertEquals(
+            1,
+            onlyMediatek.size,
+            "Only the MIUI rule may match a miui.enterprise frame, not the MediaTek rule",
+        )
+    }
+
+    @Test
+    fun `MIUI enterprise rule does not ignore a boost framework disk read`() {
+        val matching = threadPolicyIgnoredViolationRules.filter { it.shouldIgnore(mediatekBoostFwkTouchDiskRead) }
+        assertEquals(
+            1,
+            matching.size,
+            "Only the MediaTek rule may match a com.mediatek.boostfwk frame, not the MIUI rule",
+        )
+    }
+
+    // endregion
+
     /** A disk read performed by the app's own code must stay fatal. */
     private val appCodeDiskRead = diskReadViolation(
         StackTraceElement("java.io.File", "exists", "File.java", -2),
@@ -55,42 +249,27 @@ class IgnoreViolationRulesTest {
         ),
     )
 
-    @Test
-    fun `Mediatek boost framework disk read is ignored`() {
-        assertTrue(
-            threadPolicyIgnoredViolationRules.any { it.shouldIgnore(mediatekBoostFwkTouchViolation) },
-            "The vendor boost framework violation must not be fatal",
-        )
-    }
-
-    @Test
-    fun `Disk read from the app's own code is still fatal`() {
-        assertFalse(
-            threadPolicyIgnoredViolationRules.any { it.shouldIgnore(appCodeDiskRead) },
-            "A disk read with no vendor frame must keep triggering FailFast",
-        )
-    }
-
-    @Test
-    fun `Exactly one rule covers the boost framework violation`() {
-        val matching = threadPolicyIgnoredViolationRules.filter { it.shouldIgnore(mediatekBoostFwkTouchViolation) }
-        assertEquals(1, matching.size, "Exactly one rule should match the boost framework violation")
-    }
-
-    @Test
-    fun `Boost framework rule does not ignore other violation types`() {
-        val notADiskRead = mockk<Violation>()
-        assertFalse(
-            threadPolicyIgnoredViolationRules.any { it.shouldIgnore(notADiskRead) },
-            "The Mediatek rule must stay scoped to DiskReadViolation",
-        )
-    }
+    /** A disk write performed by the app's own code must stay fatal. */
+    private val appCodeDiskWrite = diskWriteViolation(
+        StackTraceElement("libcore.io.BlockGuardOs", "mkdir", "BlockGuardOs.java", -2),
+        StackTraceElement(
+            "io.homeassistant.companion.android.sensors.SensorReceiver",
+            "onReceive",
+            "SensorReceiver.kt",
+            -2,
+        ),
+    )
 
     /**
      * `DiskReadViolation`'s constructor is package-private in the SDK stubs, so the violation is
      * mocked instead of built. Only [Violation.stackTrace] matters to the rules under test.
      */
     private fun diskReadViolation(vararg frames: StackTraceElement): DiskReadViolation = mockk {
+        every { stackTrace } returns frames
+    }
+
+    /** Same, for `DiskWriteViolation`. */
+    private fun diskWriteViolation(vararg frames: StackTraceElement): DiskWriteViolation = mockk {
         every { stackTrace } returns frames
     }
 }
