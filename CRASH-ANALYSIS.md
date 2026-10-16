@@ -258,9 +258,30 @@ ManualServerViewModelTest.kt:25:21 No value passed for parameter 'endpointProbe'
 | 新 APK | `:app:assembleMinimalDebug` | 见 §4.1 |
 | 静态检查 | `bash .github/scripts/apk-static-inspection.sh` | 见 §4.1 |
 
-### 4.1 结果
+### 4.1 结果（实测）
 
-（见随附 `BUILD-TEST-REPORT.md` 的更新版）
+| 项 | 值 |
+|---|---|
+| 定点单测 | `:app:testMinimalDebugUnitTest --tests IgnoreViolationRulesTest --tests ManualServerViewModelTest` → `BUILD SUCCESSFUL in 7m 37s`，`IgnoreViolationRulesTest` 4/4、`ManualServerViewModelTest` 3/3，failures=errors=0 |
+| 新 APK | `:app:assembleMinimalDebug` → `BUILD SUCCESSFUL`，`75,670,931 字节`，SHA-256 `12407d556823364cb83580c8b6331025ec4ddb6ecd8bf32f117025dba10c4d15` |
+| 新规则入包 | `classes7.dex` 中可检索到 `IgnoreMediatekBoostFwkDiskRead`（6 次）与 `com.mediatek.boostfwk`（1 次）字面量 |
+| 静态检查 | `apk-static-inspection.sh` → `exit=0`，结论「通过」；包名/标签/启动入口不变，合并后清单无 `Leaks` |
+| 提交 | `55bf17e` |
+
+### 4.2 全量 `:app:testMinimalDebugUnitTest` 在本机无法完成
+
+首次尝试把三个任务串在一起跑（`:common:testDebugUnitTest` → `:app:testMinimalDebugUnitTest` →
+`:app:assembleMinimalDebug`），结果 **测试 JVM 挂起**：
+
+* 运行 1 小时后，测试进程 CPU 时间停在 `767.9s` 不再增长（约 15 分钟无变化）；
+* `/tmp/` 下出现多个 `robolectric-no-test-yet<随机数>` **空目录**（14:05 / 14:27 / 14:28），
+  说明 Robolectric 反复尝试建立沙箱但没有任何测试跑完；
+* 50 分钟内 `app/build/test-results/` **没有新增任何 XML**（Gradle 是按类即时写结果的）。
+
+判断为本机环境问题（Robolectric 4.17 沙箱在 Windows + JDK 21 + 该代理网络下死锁），
+不是代码问题 —— 定点跑同类测试是正常的。处理方式：终止挂起进程，改跑定点测试 + 构建。
+**`:app` 全量单测因此未在本机执行**；这套测试此前甚至无法编译（见 §2.2），
+在工作流里也是 `continue-on-error` 的参考步骤。
 
 ---
 
