@@ -23,7 +23,17 @@ enum class EndpointProbeFailure {
     /** No route to the host, for example a blocked port. Strong signal. */
     NO_ROUTE_TO_HOST,
 
-    /** The peer did not speak TLS, for example a plain HTTP listener. */
+    /**
+     * The peer answered, but not with TLS: it replied with plaintext or with a protocol error that
+     * only a non-TLS listener produces. This *proves* the port serves no TLS endpoint.
+     *
+     * Kept apart from [TLS_HANDSHAKE_FAILURE] on purpose. A handshake failure can also mean "this
+     * server only speaks a TLS version we no longer offer", where downgrading to plaintext would be
+     * wrong, while this failure cannot be produced by a TLS server at all.
+     */
+    TLS_NOT_A_TLS_PEER,
+
+    /** TLS was negotiated but the handshake failed: version mismatch, alert, unexpected message. */
     TLS_HANDSHAKE_FAILURE,
 
     /** TLS worked but the certificate is untrusted, expired or has a mismatching host name. */
@@ -44,7 +54,7 @@ enum class EndpointProbeFailure {
      * that may be downgraded without asking the user again.
      */
     val provesHttpsAbsent: Boolean
-        get() = this == CONNECTION_REFUSED || this == NO_ROUTE_TO_HOST
+        get() = this == CONNECTION_REFUSED || this == NO_ROUTE_TO_HOST || this == TLS_NOT_A_TLS_PEER
 
     /** True when HTTPS demonstrably works, so a downgrade would be wrong. */
     val provesHttpsWorks: Boolean
@@ -104,7 +114,13 @@ data class FallbackEvaluation(
  *    demonstrably works or the transport is not the problem.
  * 5. An untrusted certificate is never bypassed and never silently downgraded. Certificate
  *    verification is not disabled anywhere in this module.
- * 6. Timeouts are ambiguous and always require user confirmation.
+ * 6. Timeouts and other ambiguous failures require user confirmation.
+ * 7. When the user has **explicitly accepted plaintext** for this server, an ambiguous HTTPS
+ *    failure no longer has to be proven: the decision is the user's. Rules 4 and 5 still win,
+ *    because downgrading a working HTTPS endpoint or one with an untrusted certificate would make
+ *    the connection worse rather than better. The caller additionally has to prove that the
+ *    plaintext endpoint is actually reachable before it is used, so a broken network still fails
+ *    instead of producing a bogus URL.
  */
 object HttpsFallbackPolicy {
 
@@ -158,6 +174,11 @@ object HttpsFallbackPolicy {
             "$httpsFailure on HTTPS, but the user has not accepted plaintext for this server",
         )
 
+        // An ambiguous failure is never promoted to a downgrade here, not even when the user
+        // already accepted plaintext: this policy only classifies evidence. Consent is honoured
+        // one layer up, in the resolver's second pass, where the plaintext port is actually probed
+        // and the endpoint is used only if it answers. Keeping the two apart is what stops
+        // `AUTO_DOWNGRADE` from ever meaning "we guessed".
         httpsFailure == EndpointProbeFailure.CONNECT_TIMEOUT -> FallbackEvaluation(
             FallbackDecision.REQUIRE_USER_CONFIRMATION,
             FallbackReason.AMBIGUOUS_FAILURE,
@@ -181,9 +202,17 @@ object HttpsFallbackPolicy {
     /**
      * Best effort classification of a TLS failure from an exception message.
      *
-     * Message sniffing is fragile across TLS providers, therefore anything that cannot be
-     * recognised confidently is reported as [EndpointProbeFailure.UNKNOWN_NETWORK_ERROR], which
-     * never leads to an automatic downgrade.
+     * Message sniffing is fragile across TLS providers, so the two kinds of "TLS did not work" are
+     * kept apart by what the message can actually prove:
+     *
+     * * [EndpointProbeFailure.TLS_NOT_A_TLS_PEER] means the peer's bytes were not a TLS record at
+     *   all. No TLS server can produce that, so the port demonstrably serves no HTTPS.
+     * * [EndpointProbeFailure.TLS_HANDSHAKE_FAILURE] means TLS was attempted and failed mid
+     *   handshake. That is consistent with a version or cipher mismatch with a perfectly good HTTPS
+     *   server, so it is ambiguous and never downgrades on its own.
+     *
+     * Anything unrecognised becomes [EndpointProbeFailure.UNKNOWN_NETWORK_ERROR], which also never
+     * leads to an automatic downgrade.
      */
     fun classifyTlsFailureMessage(message: String?): EndpointProbeFailure {
         val text = message?.lowercase().orEmpty()
@@ -198,14 +227,29 @@ object HttpsFallbackPolicy {
         )
         if (certificateMarkers.any { text.contains(it) }) return EndpointProbeFailure.TLS_CERT_UNTRUSTED
 
-        val notTlsMarkers = listOf(
-            "wrong_version_number",
+        // The peer answered with something that is not TLS at all.
+        val notTlsPeerMarkers = listOf(
             "unsupported or unrecognized ssl message",
             "not an ssl/tls record",
+            "does not look like a tls handshake",
+            "not a tls handshake",
+            "is not a tls record",
+        )
+        if (notTlsPeerMarkers.any { text.contains(it) }) return EndpointProbeFailure.TLS_NOT_A_TLS_PEER
+
+        // TLS was attempted but the negotiation did not complete. Ambiguous.
+        val handshakeMarkers = listOf(
+            "wrong_version_number",
+            "wrong version number",
             "record layer failure",
             "unexpected message",
+            "handshake_failure",
+            "received fatal alert",
+            "no cipher suites in common",
+            "connection closed by peer",
+            "connection reset by peer",
         )
-        if (notTlsMarkers.any { text.contains(it) }) return EndpointProbeFailure.TLS_HANDSHAKE_FAILURE
+        if (handshakeMarkers.any { text.contains(it) }) return EndpointProbeFailure.TLS_HANDSHAKE_FAILURE
 
         return EndpointProbeFailure.UNKNOWN_NETWORK_ERROR
     }

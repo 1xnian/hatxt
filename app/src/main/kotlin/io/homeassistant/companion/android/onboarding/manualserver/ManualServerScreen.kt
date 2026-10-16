@@ -38,6 +38,7 @@ import io.github.timoptr.mdiicons.rememberImageVector
 import io.homeassistant.companion.android.R
 import io.homeassistant.companion.android.common.R as commonR
 import io.homeassistant.companion.android.common.compose.composable.HAAccentButton
+import io.homeassistant.companion.android.common.compose.composable.HAPlainButton
 import io.homeassistant.companion.android.common.compose.composable.HATextField
 import io.homeassistant.companion.android.common.compose.composable.HATopBar
 import io.homeassistant.companion.android.common.compose.theme.HADimens
@@ -62,16 +63,23 @@ internal fun ManualServerScreen(
     val serverUrl by viewModel.serverUrlFlow.collectAsStateWithLifecycle()
     val isServerUrlValid by viewModel.isServerUrlValidFlow.collectAsStateWithLifecycle()
     val lookupFailure by viewModel.lookupFailureFlow.collectAsStateWithLifecycle()
+    val isResolving by viewModel.isResolvingFlow.collectAsStateWithLifecycle()
 
     ManualServerScreen(
         onConnectClick = {
             viewModel.connectToUrl(serverUrl, onConnectTo)
+        },
+        onPlaintextConnectClick = {
+            // Only reachable from the action rendered for PlaintextConfirmationRequired, i.e. after
+            // the user was told the address does not serve HTTPS.
+            viewModel.connectToUrlWithPlaintextConsent(serverUrl, onConnectTo)
         },
         onHelpClick = onHelpClick,
         onBackClick = onBackClick,
         serverUrl = serverUrl,
         onServerUrlChange = viewModel::onServerUrlChange,
         isServerUrlValid = isServerUrlValid,
+        isResolving = isResolving,
         lookupFailure = lookupFailure,
         modifier = modifier,
     )
@@ -86,6 +94,8 @@ internal fun ManualServerScreen(
     onServerUrlChange: (String) -> Unit,
     serverUrl: String,
     lookupFailure: ManualServerViewModel.LookupFailure? = null,
+    isResolving: Boolean = false,
+    onPlaintextConnectClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -95,9 +105,11 @@ internal fun ManualServerScreen(
     ) { contentPadding ->
         ManualServerContent(
             onConnectClick = onConnectClick,
+            onPlaintextConnectClick = onPlaintextConnectClick,
             serverUrl = serverUrl,
             onServerUrlChange = onServerUrlChange,
             isServerUrlValid = isServerUrlValid,
+            isResolving = isResolving,
             lookupFailure = lookupFailure,
             modifier = Modifier
                 .padding(contentPadding),
@@ -109,8 +121,10 @@ internal fun ManualServerScreen(
 private fun ManualServerContent(
     isServerUrlValid: Boolean,
     onConnectClick: () -> Unit,
+    onPlaintextConnectClick: () -> Unit,
     onServerUrlChange: (String) -> Unit,
     serverUrl: String,
+    isResolving: Boolean,
     lookupFailure: ManualServerViewModel.LookupFailure?,
     modifier: Modifier = Modifier,
 ) {
@@ -142,12 +156,32 @@ private fun ManualServerContent(
             onConnectClick = onConnectClick,
         )
 
+        if (isResolving) {
+            Text(
+                text = stringResource(commonR.string.manual_server_dynamic_lookup_resolving),
+                style = HATextStyle.BodyMedium,
+                color = LocalHAColorScheme.current.colorOnNeutralNormal,
+            )
+        }
+
+        // A record that answers only over plaintext is never used silently. The address that was
+        // confirmed to answer is shown by the field's supporting text, and this action is the
+        // consent that lets it be used.
+        if (lookupFailure is ManualServerViewModel.LookupFailure.PlaintextConfirmationRequired) {
+            HAPlainButton(
+                text = stringResource(commonR.string.manual_server_dynamic_lookup_plaintext_accept),
+                onClick = onPlaintextConnectClick,
+                enabled = !isResolving,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
         Spacer(modifier = Modifier.weight(1f))
 
         HAAccentButton(
             text = stringResource(commonR.string.manual_server_connect),
             onClick = onConnectClick,
-            enabled = isServerUrlValid,
+            enabled = isServerUrlValid && !isResolving,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = HADimens.SPACE6),
@@ -171,14 +205,19 @@ private fun ServerUrlTextField(
         is ManualServerViewModel.LookupFailure.Message ->
             stringResource(commonR.string.manual_server_dynamic_lookup_failed, lookupFailure.detail)
 
-        ManualServerViewModel.LookupFailure.PlaintextConfirmationRequired ->
-            stringResource(commonR.string.manual_server_dynamic_lookup_plaintext)
+        is ManualServerViewModel.LookupFailure.PlaintextConfirmationRequired ->
+            stringResource(commonR.string.manual_server_dynamic_lookup_plaintext, lookupFailure.url)
 
         ManualServerViewModel.LookupFailure.InvalidResult ->
             stringResource(commonR.string.manual_server_wrong_url)
 
         null -> null
     }
+
+    // The field accepts a DNS record reference, which is not a URL users would guess on their own.
+    // The hint is shown while the field is empty and while a reference is being typed.
+    val isRecordReference = serverUrl.startsWith("txt://", ignoreCase = true) ||
+        serverUrl.startsWith("srv://", ignoreCase = true)
 
     HATextField(
         value = serverUrl,
@@ -219,11 +258,19 @@ private fun ServerUrlTextField(
         ),
         supportingText = {
             val message = lookupFailureMessage
+                ?: stringResource(commonR.string.manual_server_dynamic_lookup_hint)
+                    .takeIf { serverUrl.isEmpty() || isRecordReference }
                 ?: stringResource(commonR.string.manual_server_wrong_url).takeIf { isError }
             if (message != null) {
                 Text(
                     text = message,
-                    style = HATextStyle.BodyMedium.copy(color = LocalHAColorScheme.current.colorBorderDangerNormal),
+                    style = HATextStyle.BodyMedium.copy(
+                        color = if (lookupFailureMessage != null || isError) {
+                            LocalHAColorScheme.current.colorBorderDangerNormal
+                        } else {
+                            LocalHAColorScheme.current.colorOnNeutralNormal
+                        },
+                    ),
                 )
             }
         },

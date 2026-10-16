@@ -1612,5 +1612,8 @@
     <string name="endpoint_default_port_summary">Used when a record does not carry a port. Home Assistant listens on 8123 by default.</string>
     <string name="endpoint_default_port_invalid">Enter a port between 1 and 65535.</string>
     <string name="manual_server_dynamic_lookup_failed">Could not resolve the record: %1$s</string>
-    <string name="manual_server_dynamic_lookup_plaintext">HTTPS could not be confirmed for this record. Enter the plain http address explicitly to connect without encryption.</string>
+    <string name="manual_server_dynamic_lookup_plaintext">%1$s answers, but it does not serve HTTPS. Connecting to it sends your credentials unencrypted.</string>
+    <string name="manual_server_dynamic_lookup_plaintext_accept">Connect over http without encryption</string>
+    <string name="manual_server_dynamic_lookup_resolving">Looking up the record…</string>
+    <string name="manual_server_dynamic_lookup_hint">A txt:// or srv:// address is looked up in DNS, for example txt://ha.example.com.</string>
 </resources>

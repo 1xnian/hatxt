@@ -3,6 +3,7 @@ package io.homeassistant.companion.android.common.data.endpoint
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -189,10 +190,11 @@ class TxtRecordInterpreterTest {
     }
 
     @Test
-    fun `unsupported scheme is rejected`() {
+    fun `unsupported scheme is rejected with the scheme name`() {
         val result = interpret("ftp://ha.example.com:8123")
         assertFalse(result.isUsable)
-        assertEquals(EndpointRejectionReason.INVALID_URL, result.rejected.single().reason)
+        assertEquals(EndpointRejectionReason.UNSUPPORTED_SCHEME, result.rejected.single().reason)
+        assertEquals("ftp", result.rejected.single().detail)
     }
 
     @Test
@@ -276,5 +278,117 @@ class TxtRecordInterpreterTest {
         val candidate = single("host=ha.example.com;port=8123;path=/ha/")
         assertEquals("ha", candidate.path)
         assertNotNull(EndpointUrlFactory.normalizePath(candidate.path))
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Every shape a real deployment is expected to publish, including the ones reported as failing
+    // against the app. `117.183.5.29:13481` is the value that was actually found in DNS.
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    fun `every documented shape produces exactly one usable candidate`() {
+        val shapes = listOf(
+            "http://117.183.5.29:13481",
+            "https://117.183.5.29:13481",
+            "tcp://117.183.5.29:13481",
+            "117.183.5.29:13481",
+            "ip=117.183.5.29;port=13481",
+        )
+
+        shapes.forEach { shape ->
+            val result = interpret(shape)
+            assertTrue(result.isUsable, "'$shape' must be usable, rejected=${result.rejected}")
+            assertEquals(1, result.candidates.size, "'$shape' must yield exactly one candidate")
+            val candidate = result.candidates.first()
+            assertEquals("117.183.5.29", candidate.host, "'$shape'")
+            assertEquals(13481, candidate.port, "'$shape'")
+        }
+    }
+
+    @Test
+    fun `an explicit http url is honoured as written`() {
+        val candidate = single("http://117.183.5.29:13481")
+        assertEquals(EndpointScheme.HTTP, candidate.scheme)
+        assertEquals(EndpointTransport.HTTP, candidate.transport)
+    }
+
+    @Test
+    fun `tcp declares a bare endpoint and never assumes a scheme`() {
+        val candidate = single("tcp://117.183.5.29:13481")
+
+        // No scheme: the transport has to be discovered by probing, it must not be guessed as http.
+        assertNull(candidate.scheme)
+        assertEquals(EndpointTransport.TCP, candidate.transport)
+        assertTrue(candidate.isBareTcpEndpoint)
+    }
+
+    @Test
+    fun `tcp without a port uses the default port`() {
+        val candidate = single("tcp://117.183.5.29")
+        assertEquals(defaultPort, candidate.port)
+        assertNull(candidate.scheme)
+    }
+
+    @Test
+    fun `tcp keeps a path and is case insensitive`() {
+        val candidate = single("TCP://ha.example.com:8123/ha")
+        assertEquals("ha", candidate.path)
+        assertEquals(EndpointTransport.TCP, candidate.transport)
+        assertNull(candidate.scheme)
+    }
+
+    @Test
+    fun `tcp with an out of range port is reported as a port problem`() {
+        val result = interpret("tcp://117.183.5.29:99999")
+        assertFalse(result.isUsable)
+        assertEquals(EndpointRejectionReason.INVALID_PORT, result.rejected.single().reason)
+    }
+
+    @Test
+    fun `tcp without a host is rejected`() {
+        val result = interpret("tcp:///ha")
+        assertFalse(result.isUsable)
+        assertEquals(EndpointRejectionReason.MISSING_HOST, result.rejected.single().reason)
+    }
+
+    @Test
+    fun `a value the transport joined from several character strings is read as one value`() {
+        // Both transports hand over the plain concatenation of the character-strings, so the
+        // interpreter receives one finished string. `117.183.5.` + `29:13481` arrives as
+        // `117.183.5.29:13481` and parses normally.
+        val candidate = single("117.183.5.29:13481")
+        assertEquals("117.183.5.29", candidate.host)
+        assertEquals(13481, candidate.port)
+    }
+
+    @Test
+    fun `a record with an embedded space is rejected instead of being rewritten`() {
+        // A space is a real character of the value (RFC 1035 section 3.3.14). Deleting it would turn
+        // this into 117.183.529:13481, an address nobody configured, so it must be rejected.
+        val result = interpret("117.183.5 29:13481")
+        assertFalse(result.isUsable)
+        assertEquals(1, result.rejected.size)
+    }
+
+    @Test
+    fun `a field bag whose port has an embedded space is rejected`() {
+        val result = interpret("ip=117.183.5.29;port=13 481")
+        assertFalse(result.isUsable)
+        assertEquals(1, result.rejected.size)
+    }
+
+    @Test
+    fun `separators inside a valid field bag are kept`() {
+        // The space between the two pairs is part of the record and separates them; it is never
+        // removed, so the bag is parsed as a bag rather than as one unparseable token.
+        val candidate = single("url=http://203.0.113.10:8123 port=2026")
+        assertEquals(2026, candidate.port)
+        assertEquals(EndpointScheme.HTTP, candidate.scheme)
+    }
+
+    @Test
+    fun `records without a transport report provenance as unspecified`() {
+        assertEquals(EndpointTransport.UNSPECIFIED, single("117.183.5.29:13481").transport)
+        assertEquals(EndpointTransport.UNSPECIFIED, single("ip=117.183.5.29;port=13481").transport)
     }
 }

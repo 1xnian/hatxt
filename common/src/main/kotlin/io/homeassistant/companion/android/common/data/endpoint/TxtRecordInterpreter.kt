@@ -13,6 +13,8 @@ package io.homeassistant.companion.android.common.data.endpoint
  * ```
  * https://ha.example.com:8123          full URL, scheme and port are kept
  * https://ha.example.com/ha            full URL with a path
+ * http://203.0.113.10:8123             full URL asking for plaintext explicitly
+ * tcp://203.0.113.10:8123              bare TCP endpoint, the transport is DISCOVERED, see below
  * 203.0.113.10:8123                    bare host:port, scheme comes from the preference
  * 203.0.113.10                         bare host, default port is used
  * ha.example.com                       host name that is resolved to A/AAAA later
@@ -23,6 +25,29 @@ package io.homeassistant.companion.android.common.data.endpoint
  *
  * Anything else is reported as [RejectedRecord] with a reason instead of silently producing a
  * bogus endpoint.
+ *
+ * ## What `tcp://` means here
+ *
+ * `tcp://host:port` declares **a TCP endpoint, not an HTTP service**. It carries no information
+ * about whether that port speaks TLS or plain HTTP, so it is turned into a candidate with no scheme
+ * ([EndpointCandidate.isBareTcpEndpoint]) and the resolver has to find out:
+ *
+ * 1. HTTPS is probed first and used when it answers.
+ * 2. When it does not, the endpoint is **never** rewritten to `http://` and declared good. The
+ *    plaintext fallback follows the normal rule, which means the user has to accept it first.
+ *
+ * Assuming HTTP because the scheme was `tcp` would quietly send credentials over an unencrypted
+ * connection, so that assumption is deliberately not made.
+ *
+ * ## Split character-strings
+ *
+ * DNS may split one TXT value across several character-strings. RFC 1035 section 3.3.14 makes the
+ * value the plain concatenation of the pieces, and both transports deliver it that way: the
+ * wire-format decoder in [DnsMessageCodec] joins the raw pieces, and the DoH JSON path joins the
+ * quoted pieces with no separator as well. This interpreter therefore treats every character it
+ * receives as part of the value. It never re-joins a value with whitespace removed, because doing so
+ * would rewrite `117.183.5 29:13481` into `117.183.529:13481` and hand the WebView a host nobody
+ * configured.
  */
 object TxtRecordInterpreter {
 
@@ -43,13 +68,16 @@ object TxtRecordInterpreter {
 
     private val HOST_PORT_REGEX = Regex("^(\\[[0-9A-Fa-f:.]+]|[^:/?#@\\s]+):(\\d{1,6})$")
 
+    /** `tcp://` prefix, handled before the generic URL path because `tcp` is not an HTTP scheme. */
+    private val TCP_PREFIX_REGEX = Regex("^tcp://(.+)$", RegexOption.IGNORE_CASE)
+
     /**
      * Interprets every record and returns the usable candidates in preference order.
      *
      * @param records raw TXT payloads. `null`/blank entries are rejected as [EndpointRejectionReason.EMPTY_RECORD].
      * @param defaultPort port used when the record does not carry one.
      * @param preferredScheme scheme used when the record does not carry one. Defaults to HTTPS so
-     *   that a bare record never silently downgrades the transport, see section 6 of the spec.
+     *   that a bare record never silently downgrades the transport.
      */
     fun interpret(
         records: List<String?>,
@@ -66,7 +94,8 @@ object TxtRecordInterpreter {
                 return@forEach
             }
 
-            when (val parsed = parseRecord(record, defaultPort, preferredScheme)) {
+            val parsed = parseRecord(record, defaultPort, preferredScheme)
+            when (parsed) {
                 is SingleRecordResult.Ok -> parsed.candidates.forEach { candidate ->
                     val key = candidateKey(candidate)
                     if (candidates.containsKey(key)) {
@@ -99,18 +128,71 @@ object TxtRecordInterpreter {
             return parseKeyValueRecord(record, defaultPort, preferredScheme)
         }
 
-        // 1. A scheme makes the record a full URL.
-        if (schemeSeparator >= 0) {
-            val parsed = EndpointUrlFactory.parseUrl(record)
-                ?: return SingleRecordResult.Invalid(
-                    EndpointRejectionReason.INVALID_URL,
-                    "not a valid http(s) URL",
-                )
-            return SingleRecordResult.Ok(listOf(parsed.toCandidate(record)))
+        // 1. `tcp://` declares a TCP endpoint, not an HTTP service: no scheme is assumed.
+        TCP_PREFIX_REGEX.matchEntire(record)?.let { match ->
+            val remainder = match.groupValues[1]
+            val authority = remainder.substringBefore('/')
+            val path = remainder.removePrefix(authority)
+            if (authority.isEmpty()) {
+                return SingleRecordResult.Invalid(EndpointRejectionReason.MISSING_HOST, "tcp:// carries no host")
+            }
+            return parseAuthority(
+                value = authority,
+                defaultPort = defaultPort,
+                transport = EndpointTransport.TCP,
+                scheme = null,
+                path = EndpointUrlFactory.normalizePath(path),
+                sourceRecord = record,
+            )
         }
 
-        // 2. A bare host:port pair.
-        HOST_PORT_REGEX.matchEntire(record)?.let { match ->
+        // 2. Any other scheme makes the record a full URL.
+        if (schemeSeparator >= 0) {
+            val schemeName = EndpointUrlFactory.schemePrefixOf(record)
+            val parsed = EndpointUrlFactory.parseUrl(record)
+            if (parsed == null) {
+                // Distinguish "a scheme we cannot speak" from "a broken http(s) URL".
+                return if (schemeName != null && EndpointTransport.fromUrlScheme(schemeName) == null) {
+                    SingleRecordResult.Invalid(EndpointRejectionReason.UNSUPPORTED_SCHEME, schemeName)
+                } else {
+                    SingleRecordResult.Invalid(
+                        EndpointRejectionReason.INVALID_URL,
+                        "not a valid http(s) URL",
+                    )
+                }
+            }
+            return SingleRecordResult.Ok(
+                listOf(
+                    parsed.toCandidate(record).copy(transport = EndpointTransport.fromUrlScheme(parsed.scheme.urlScheme)!!),
+                ),
+            )
+        }
+
+        // 3. A bare host:port pair, or a bare host using the default port.
+        return parseAuthority(
+            value = record,
+            defaultPort = defaultPort,
+            transport = EndpointTransport.UNSPECIFIED,
+            scheme = preferredScheme,
+            sourceRecord = record,
+        )
+    }
+
+    /**
+     * Parses `[host][:port]`.
+     *
+     * Shared by the bare-record path and the `tcp://` path so both report the same reasons for the
+     * same mistakes.
+     */
+    private fun parseAuthority(
+        value: String,
+        defaultPort: Int,
+        transport: EndpointTransport,
+        scheme: EndpointScheme?,
+        sourceRecord: String,
+        path: String? = null,
+    ): SingleRecordResult {
+        HOST_PORT_REGEX.matchEntire(value)?.let { match ->
             val host = EndpointUrlFactory.normalizeHost(match.groupValues[1])
             val port = EndpointUrlFactory.parsePortOrNull(match.groupValues[2])
                 ?: return SingleRecordResult.Invalid(
@@ -118,18 +200,21 @@ object TxtRecordInterpreter {
                     match.groupValues[2],
                 )
             return if (EndpointUrlFactory.isValidHost(host)) {
-                SingleRecordResult.Ok(listOf(EndpointCandidate(host, port, preferredScheme, sourceRecord = record)))
+                SingleRecordResult.Ok(
+                    listOf(EndpointCandidate(host, port, scheme, path, sourceRecord, transport)),
+                )
             } else {
                 SingleRecordResult.Invalid(EndpointUrlFactory.classifyInvalidHost(host), host)
             }
         }
 
-        // 3. A bare host, port is taken from the default.
-        val host = EndpointUrlFactory.normalizeHost(record)
+        val host = EndpointUrlFactory.normalizeHost(value)
         if (!EndpointUrlFactory.isValidHost(host)) {
             return SingleRecordResult.Invalid(EndpointUrlFactory.classifyInvalidHost(host), host)
         }
-        return SingleRecordResult.Ok(listOf(EndpointCandidate(host, defaultPort, preferredScheme, sourceRecord = record)))
+        return SingleRecordResult.Ok(
+            listOf(EndpointCandidate(host, defaultPort, scheme, path, sourceRecord, transport)),
+        )
     }
 
     private fun parseKeyValueRecord(

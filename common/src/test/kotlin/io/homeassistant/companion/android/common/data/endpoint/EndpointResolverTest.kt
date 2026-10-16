@@ -131,7 +131,8 @@ class EndpointResolverTest {
 
         assertFalse(result.success)
         assertNull(result.endpoint)
-        assertEquals(EndpointRejectionReason.SRV_ALL_CANDIDATES_INVALID, result.error?.reason)
+        // TXT and SRV report their own reason: the stage that failed is part of the error.
+        assertEquals(EndpointRejectionReason.TXT_ALL_RECORDS_INVALID, result.error?.reason)
     }
 
     @Test
@@ -142,7 +143,7 @@ class EndpointResolverTest {
         val result = EndpointResolver(dns, FakeProbe()).resolve(txtSettings())
 
         assertFalse(result.success)
-        assertEquals(EndpointRejectionReason.DNS_LOOKUP_FAILED, result.error?.reason)
+        assertEquals(EndpointRejectionReason.DNS_UNREACHABLE, result.error?.reason)
     }
 
     @Test
@@ -381,5 +382,200 @@ class EndpointResolverTest {
 
         assertTrue(result.success)
         assertTrue(result.rejected.any { it.reason == EndpointRejectionReason.INVALID_IP_ADDRESS })
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The scenario that was reported as broken: a TXT record whose value points at a Home Assistant
+    // instance that only serves plain HTTP, e.g. `117.183.5.29:13481`.
+    // ---------------------------------------------------------------------------------------------
+
+    private val plaintextHostUrl = "http://117.183.5.29:13481"
+    private val httpsHostUrl = "https://117.183.5.29:13481"
+
+    /** A server that answers plain HTTP and nothing else, i.e. exactly what was measured. */
+    private fun plaintextOnlyProbe() = FakeProbe(
+        mapOf(httpsHostUrl to EndpointProbeFailure.TLS_NOT_A_TLS_PEER),
+    )
+
+    @Test
+    fun `a plaintext only record is offered to the user instead of being downgraded silently`() {
+        val dns = FakeDnsClient(mapOf(("ha.example.com" to DnsRecordType.TXT) to txt("117.183.5.29:13481")))
+        val probe = plaintextOnlyProbe()
+
+        val result = EndpointResolver(dns, probe).resolve(txtSettings(allowHttpFallback = true), plaintextConsent = false)
+
+        assertFalse(result.success)
+        assertNull(result.endpoint)
+        assertEquals(EndpointRejectionReason.PLAINTEXT_CONFIRMATION_REQUIRED, result.error?.reason)
+        // The address that answered is carried out, so the UI can offer exactly it.
+        assertEquals(plaintextHostUrl, result.pendingPlaintextEndpoint?.url)
+        assertTrue(result.error?.message?.contains(plaintextHostUrl) == true, "the message must name the address")
+        // Nothing was accepted, and the endpoint was probed over plaintext only to confirm it answers.
+        assertTrue(probe.probed.contains(plaintextHostUrl))
+        // An offer is not a rejection, so it never reaches lastProbeFailure. The trail has to carry
+        // the HTTPS failure anyway, otherwise the most interesting case would read "NONE".
+        val diagnostics = result.error?.diagnostics.orEmpty()
+        assertTrue(diagnostics.contains("httpsProbeOfOfferedEndpoint=TLS_NOT_A_TLS_PEER"), diagnostics)
+    }
+
+    @Test
+    fun `the same record connects over plaintext once the user accepts it`() {
+        val dns = FakeDnsClient(mapOf(("ha.example.com" to DnsRecordType.TXT) to txt("117.183.5.29:13481")))
+
+        val result = EndpointResolver(dns, plaintextOnlyProbe())
+            .resolve(txtSettings(allowHttpFallback = true), plaintextConsent = true)
+
+        assertTrue(result.success)
+        assertEquals(plaintextHostUrl, result.endpoint?.url)
+        assertEquals(EndpointScheme.HTTP, result.endpoint?.scheme)
+        assertNotNull(result.endpoint?.downgradeReason)
+    }
+
+    @Test
+    fun `a tcp record is never turned into http without consent`() {
+        val dns = FakeDnsClient(mapOf(("ha.example.com" to DnsRecordType.TXT) to txt("tcp://117.183.5.29:13481")))
+
+        val result = EndpointResolver(dns, plaintextOnlyProbe())
+            .resolve(txtSettings(allowHttpFallback = true), plaintextConsent = false)
+
+        assertFalse(result.success)
+        assertNull(result.endpoint)
+        assertEquals(EndpointRejectionReason.PLAINTEXT_CONFIRMATION_REQUIRED, result.error?.reason)
+        assertEquals(plaintextHostUrl, result.pendingPlaintextEndpoint?.url)
+    }
+
+    @Test
+    fun `a tcp record that does serve https is used as https`() {
+        val dns = FakeDnsClient(mapOf(("ha.example.com" to DnsRecordType.TXT) to txt("tcp://117.183.5.29:13481")))
+
+        val result = EndpointResolver(dns, FakeProbe()).resolve(txtSettings())
+
+        assertTrue(result.success)
+        assertEquals(httpsHostUrl, result.endpoint?.url)
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // One reason per stage, so the UI never has to say "lookup failed" for four different problems.
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    fun `every dns outcome maps to its own reason`() {
+        val cases = mapOf(
+            DnsQueryStatus.NXDOMAIN to EndpointRejectionReason.DNS_NAME_NOT_FOUND,
+            DnsQueryStatus.EMPTY to EndpointRejectionReason.DNS_NO_RECORD_OF_TYPE,
+            DnsQueryStatus.SERVER_FAILURE to EndpointRejectionReason.DNS_RESOLVER_ERROR,
+            DnsQueryStatus.REFUSED to EndpointRejectionReason.DNS_RESOLVER_ERROR,
+            DnsQueryStatus.TIMEOUT to EndpointRejectionReason.DNS_UNREACHABLE,
+            DnsQueryStatus.NETWORK_ERROR to EndpointRejectionReason.DNS_UNREACHABLE,
+            DnsQueryStatus.MALFORMED to EndpointRejectionReason.DNS_RESPONSE_MALFORMED,
+        )
+
+        val messages = mutableSetOf<String>()
+        cases.forEach { (status, expected) ->
+            val dns = FakeDnsClient(
+                mapOf(("ha.example.com" to DnsRecordType.TXT) to DnsQueryResult(status = status)),
+            )
+            val result = EndpointResolver(dns, FakeProbe()).resolve(txtSettings())
+
+            assertFalse(result.success, "$status must fail")
+            assertEquals(expected, result.error?.reason, "$status")
+            result.error?.message?.let { messages += it }
+        }
+
+        // Distinct wordings, not seven copies of the same sentence.
+        assertEquals(cases.size, messages.size, "each status needs its own message")
+    }
+
+    @Test
+    fun `a dns failure carries the resolver trail for debugging`() {
+        val dns = FakeDnsClient(
+            mapOf(
+                ("ha.example.com" to DnsRecordType.TXT) to DnsQueryResult(
+                    status = DnsQueryStatus.NETWORK_ERROR,
+                    attempts = listOf(
+                        DnsAttempt("system", DnsQueryStatus.TIMEOUT, 4_000),
+                        DnsAttempt("doh:doh.pub", DnsQueryStatus.NETWORK_ERROR, 120, "SocketTimeoutException"),
+                    ),
+                ),
+            ),
+        )
+        val result = EndpointResolver(dns, FakeProbe()).resolve(txtSettings())
+
+        val diagnostics = result.error?.diagnostics.orEmpty()
+        assertTrue(diagnostics.contains("system"), diagnostics)
+        assertTrue(diagnostics.contains("doh:doh.pub"), diagnostics)
+        assertTrue(diagnostics.contains("attempts=["), diagnostics)
+    }
+
+    @Test
+    fun `only txt answers are interpreted as records`() {
+        // A TXT query whose answer section holds an A record: that value is not a TXT payload and
+        // must never be turned into a host.
+        val dns = FakeDnsClient(
+            mapOf(
+                ("ha.example.com" to DnsRecordType.TXT) to DnsQueryResult(
+                    answers = listOf(DnsAnswer(DnsRecordType.A, "203.0.113.10")),
+                    status = DnsQueryStatus.NOERROR,
+                ),
+            ),
+        )
+        val result = EndpointResolver(dns, FakeProbe()).resolve(txtSettings())
+
+        assertFalse(result.success)
+        assertEquals(EndpointRejectionReason.DNS_NO_RECORD_OF_TYPE, result.error?.reason)
+    }
+
+    @Test
+    fun `a cname alias is followed once`() {
+        val dns = FakeDnsClient(
+            mapOf(
+                ("ha.example.com" to DnsRecordType.TXT) to DnsQueryResult(
+                    status = DnsQueryStatus.EMPTY,
+                    canonicalNames = listOf("home.example.com"),
+                ),
+                ("home.example.com" to DnsRecordType.TXT) to txt("203.0.113.10:8123"),
+            ),
+        )
+        val result = EndpointResolver(dns, FakeProbe()).resolve(txtSettings())
+
+        assertTrue(result.success)
+        assertEquals("https://203.0.113.10:8123", result.endpoint?.url)
+        assertTrue(dns.queries.contains("home.example.com" to DnsRecordType.TXT))
+    }
+
+    @Test
+    fun `an alias that resolves to nothing is reported as missing rather than retried forever`() {
+        val dns = FakeDnsClient(
+            mapOf(
+                ("ha.example.com" to DnsRecordType.TXT) to DnsQueryResult(
+                    status = DnsQueryStatus.EMPTY,
+                    canonicalNames = listOf("home.example.com"),
+                ),
+            ),
+        )
+        val result = EndpointResolver(dns, FakeProbe()).resolve(txtSettings())
+
+        assertFalse(result.success)
+        // The alias target is not in the zone at all, and that is what the user is told.
+        assertEquals(EndpointRejectionReason.DNS_NAME_NOT_FOUND, result.error?.reason)
+        assertEquals(2, dns.queries.size)
+    }
+
+    @Test
+    fun `an alias target without the record type is reported as a missing record`() {
+        val dns = FakeDnsClient(
+            mapOf(
+                ("ha.example.com" to DnsRecordType.TXT) to DnsQueryResult(
+                    status = DnsQueryStatus.EMPTY,
+                    canonicalNames = listOf("home.example.com"),
+                ),
+                ("home.example.com" to DnsRecordType.TXT) to DnsQueryResult(status = DnsQueryStatus.EMPTY),
+            ),
+        )
+        val result = EndpointResolver(dns, FakeProbe()).resolve(txtSettings())
+
+        assertFalse(result.success)
+        assertEquals(EndpointRejectionReason.DNS_NO_RECORD_OF_TYPE, result.error?.reason)
+        assertEquals(2, dns.queries.size)
     }
 }

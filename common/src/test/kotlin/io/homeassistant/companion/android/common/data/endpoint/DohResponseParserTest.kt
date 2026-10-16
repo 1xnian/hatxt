@@ -42,11 +42,23 @@ class DohResponseParserTest {
 
         val value = DohResponseParser.parse(body).answers.single().value
 
-        assertEquals("host=ha.example.com  port=8123", value.trim())
+        // The space in the JSON presentation form separates the two character-strings and is not
+        // part of the value, so the pieces are concatenated. The one space that remains is the one
+        // that is literally inside the second character-string.
+        assertEquals("host=ha.example.com port=8123", value)
         // The joined value must still be usable by the TXT interpreter.
         val interpreted = TxtRecordInterpreter.interpret(listOf(value), 8123)
         assertEquals("ha.example.com", interpreted.candidates.single().host)
         assertEquals(8123, interpreted.candidates.single().port)
+    }
+
+    @Test
+    fun `the json path joins a value split inside a host name the way the wire format does`() {
+        // A record split inside the address must survive the JSON presentation form intact.
+        // DnsMessageCodecTest proves the same input in wire form decodes to 117.183.5.29:13481, so
+        // the two transports agree and a lookup cannot depend on which one answered it.
+        assertEquals("117.183.5.29:13481", DohResponseParser.normalizeTxtValue("\"117.183.5.\" \"29:13481\""))
+        assertEquals("117.183.5.29:13481", DohResponseParser.normalizeTxtValue("\"117\" \".183.5\" \".29:13481\""))
     }
 
     @Test

@@ -27,6 +27,14 @@ object EndpointUrlFactory {
 
     fun isValidPort(port: Int): Boolean = port in MIN_PORT..MAX_PORT
 
+    /**
+     * Scheme prefix of a URL-like value, lower case and without `://`, or `null` when there is none.
+     *
+     * Used to tell "a scheme this app cannot speak" apart from "a URL that is broken", which are two
+     * very different messages for the user.
+     */
+    fun schemePrefixOf(raw: String): String? = SCHEME_PREFIX_REGEX.find(raw.trim())?.groupValues?.get(1)?.lowercase()
+
     /** Strict dotted-quad check. Leading zeros are rejected to rule out octal/hex ambiguity. */
     fun isValidIpv4Literal(raw: String): Boolean {
         val parts = raw.trim().split('.')

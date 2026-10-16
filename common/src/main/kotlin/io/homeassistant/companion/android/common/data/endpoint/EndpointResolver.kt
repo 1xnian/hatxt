@@ -107,19 +107,25 @@ class EndpointResolver(
         }
 
         if (!interpretation.isUsable) {
-            val (reason, message) = interpretation.failureReason(settings.mode, recordName)
-            eventRecorder.record(EndpointLifecycleEvent.RESOLUTION_FAILED, "$reason: $message")
+            val failure = interpretation.failureReason(settings.mode, recordName)
+            eventRecorder.record(EndpointLifecycleEvent.RESOLUTION_FAILED, "${failure.reason}: ${failure.message}")
             return EndpointResolutionResult.failure(
-                EndpointResolutionError(reason, message),
+                EndpointResolutionError(
+                    reason = failure.reason,
+                    message = failure.message,
+                    retryable = failure.retryable,
+                    diagnostics = failure.diagnostics,
+                ),
                 rejected = interpretation.rejected,
                 durationMs = clock() - started,
             )
         }
 
         val rejected = interpretation.rejected.toMutableList()
-        var pendingConfirmation: FallbackEvaluation? = null
         var lastFailure: EndpointProbeFailure = EndpointProbeFailure.NONE
+        var certificateProblem = false
         val downgradeOptions = mutableListOf<CandidateOutcome.Downgrade>()
+        val consentOptions = mutableListOf<CandidateOutcome.NeedsConfirmation>()
 
         // Pass 1 prefers an endpoint that works over HTTPS. A candidate that would need a plaintext
         // fallback is only remembered, so another candidate may still provide working HTTPS.
@@ -134,62 +140,131 @@ class EndpointResolver(
                 }
 
                 is CandidateOutcome.Downgrade -> downgradeOptions += outcome
-                is CandidateOutcome.NeedsConfirmation -> pendingConfirmation = outcome.evaluation
+                is CandidateOutcome.NeedsConfirmation -> {
+                    // An untrusted certificate is never traded for plaintext: that would make the
+                    // connection worse, not better.
+                    if (outcome.evaluation.reason == FallbackReason.CERTIFICATE_NOT_TRUSTED) {
+                        certificateProblem = true
+                    } else {
+                        consentOptions += outcome
+                    }
+                }
+
                 is CandidateOutcome.Rejected -> lastFailure = outcome.failure
             }
         }
 
-        // Pass 2 runs only when no candidate served HTTPS, and the policy already allowed the
-        // downgrade for at least one of them. The plaintext endpoint still has to be reachable.
-        downgradeOptions.forEach { option ->
-            val httpFailure = probe.probe(option.endpoint)
-            if (httpFailure == EndpointProbeFailure.NONE) {
+        // Pass 2 runs only when no candidate served HTTPS. Every endpoint that did not is probed
+        // over plaintext, and it is only ever used *or offered* when it actually answers: that is
+        // what keeps a plaintext fallback from being a guess.
+        var pendingConfirmation: FallbackEvaluation? = null
+        var pendingPlaintextEndpoint: ResolvedEndpoint? = null
+        var pendingHttpsFailure: EndpointProbeFailure? = null
+
+        (downgradeOptions.map { it.endpoint to it.httpsFailure } +
+            consentOptions.map { it.endpoint to it.httpsFailure })
+            .forEach { (endpoint, httpsFailure) ->
+                val plaintextFailure = probe.probe(endpoint)
+                if (plaintextFailure != EndpointProbeFailure.NONE) {
+                    rejected += RejectedRecord(
+                        endpoint.host,
+                        EndpointRejectionReason.INVALID_URL,
+                        "plaintext probe of ${endpoint.authority} returned $plaintextFailure",
+                    )
+                    lastFailure = plaintextFailure
+                    return@forEach
+                }
+
                 val downgraded = validate(
-                    option.endpoint.copy(downgradeReason = "${option.httpsFailure} on the HTTPS port"),
+                    endpoint.copy(downgradeReason = "$httpsFailure on the HTTPS port"),
                     rejected,
-                )
-                if (downgraded != null) {
+                ) ?: return@forEach
+
+                if (plaintextConsent) {
                     eventRecorder.record(
                         EndpointLifecycleEvent.RESOLUTION_SUCCEEDED,
                         "${settings.mode} $recordName -> ${downgraded.url} (plaintext fallback)",
                     )
                     return EndpointResolutionResult.success(downgraded, rejected, clock() - started)
                 }
-            } else {
-                rejected += RejectedRecord(
-                    option.endpoint.host,
-                    EndpointRejectionReason.INVALID_URL,
-                    "HTTP probe returned $httpFailure",
-                )
-                lastFailure = httpFailure
-            }
-        }
 
-        val certificateProblem = pendingConfirmation?.reason == FallbackReason.CERTIFICATE_NOT_TRUSTED ||
-            lastFailure == EndpointProbeFailure.TLS_CERT_UNTRUSTED
+                // Plaintext answers, but using it is the user's decision. The address travels with
+                // the failure so the UI can offer exactly this endpoint instead of asking the user
+                // to work it out and retype it.
+                if (pendingPlaintextEndpoint == null) {
+                    pendingPlaintextEndpoint = downgraded
+                    pendingHttpsFailure = httpsFailure
+                    pendingConfirmation = FallbackEvaluation(
+                        decision = FallbackDecision.REQUIRE_USER_CONFIRMATION,
+                        reason = FallbackReason.PLAINTEXT_CONSENT_MISSING,
+                        detail = "$httpsFailure did not confirm HTTPS on ${endpoint.authority}, " +
+                            "but the address answers over plaintext",
+                    )
+                }
+            }
+
         val reason = when {
             certificateProblem -> EndpointRejectionReason.TLS_CERTIFICATE_NOT_TRUSTED
-            pendingConfirmation != null -> EndpointRejectionReason.PLAINTEXT_CONFIRMATION_REQUIRED
+            pendingPlaintextEndpoint != null -> EndpointRejectionReason.PLAINTEXT_CONFIRMATION_REQUIRED
+            settings.mode == EndpointResolutionMode.TXT -> EndpointRejectionReason.TXT_ALL_RECORDS_INVALID
             else -> EndpointRejectionReason.SRV_ALL_CANDIDATES_INVALID
         }
+        val rejectedSummary = describeRejected(rejected)
         val message = when (reason) {
             EndpointRejectionReason.TLS_CERTIFICATE_NOT_TRUSTED ->
                 "The certificate of the resolved endpoint is not trusted; certificate verification is never disabled"
 
             EndpointRejectionReason.PLAINTEXT_CONFIRMATION_REQUIRED ->
-                "HTTPS could not be confirmed for $recordName and the HTTP fallback needs your consent"
+                "$recordName resolves to ${pendingPlaintextEndpoint?.url}, which does not serve HTTPS. " +
+                    "Connecting to it would send your credentials unencrypted and needs your consent."
 
-            else -> "None of the ${interpretation.candidates.size} candidate(s) of $recordName could be used"
+            else -> "The ${settings.mode.name} record of $recordName was read but no usable address was found." +
+                rejectedSummary?.let { " $it" }.orEmpty()
         }
 
         eventRecorder.record(EndpointLifecycleEvent.RESOLUTION_FAILED, "$reason: $message")
         return EndpointResolutionResult.failure(
-            EndpointResolutionError(reason, message),
+            EndpointResolutionError(
+                reason = reason,
+                message = message,
+                diagnostics = describeDiagnostics(interpretation, lastFailure, rejectedSummary, pendingHttpsFailure),
+            ),
             rejected = rejected,
             durationMs = clock() - started,
             fallbackEvaluation = pendingConfirmation,
+            pendingPlaintextEndpoint = pendingPlaintextEndpoint,
         )
     }
+
+    /**
+     * One line per rejected record, reason first. Record values are the data the user published
+     * themselves and never contain credentials (`parseUrl` rejects `user:password@`), so these are
+     * safe to show and to log.
+     */
+    private fun describeRejected(rejected: List<RejectedRecord>): String? {
+        if (rejected.isEmpty()) return null
+        return rejected.distinctBy { it.reason }
+            .joinToString("; ") { "${it.reason}: ${it.detail ?: it.record}" }
+    }
+
+    /** Everything a developer needs to reproduce the failure, without any secret. */
+    private fun describeDiagnostics(
+        interpretation: Interpretation,
+        lastFailure: EndpointProbeFailure,
+        rejectedSummary: String?,
+        pendingHttpsFailure: EndpointProbeFailure? = null,
+    ): String = buildList {
+        interpretation.dnsFailure?.let { failure ->
+            add("dns=${failure.status.name}${failure.detail?.let { " ($it)" }.orEmpty()}")
+            if (failure.trail.isNotBlank()) add("attempts=[${failure.trail}]")
+        }
+        add("candidates=${interpretation.candidates.size}")
+        add("lastProbeFailure=$lastFailure")
+        // A plaintext offer is not a rejection, so it never lands in lastProbeFailure. Without this
+        // the trail would say "NONE" for the most interesting case, where HTTPS was refused.
+        pendingHttpsFailure?.let { add("httpsProbeOfOfferedEndpoint=$it") }
+        rejectedSummary?.let { add("rejected=$it") }
+    }.joinToString(" | ")
 
     private fun evaluateCandidate(
         candidate: EndpointCandidate,
@@ -255,7 +330,8 @@ class EndpointResolver(
             // candidate had a chance to serve HTTPS successfully.
             FallbackDecision.AUTO_DOWNGRADE -> CandidateOutcome.Downgrade(httpEndpoint, httpsFailure)
 
-            FallbackDecision.REQUIRE_USER_CONFIRMATION -> CandidateOutcome.NeedsConfirmation(evaluation)
+            FallbackDecision.REQUIRE_USER_CONFIRMATION ->
+                CandidateOutcome.NeedsConfirmation(evaluation, httpEndpoint, httpsFailure)
 
             FallbackDecision.FORBIDDEN,
             FallbackDecision.NOT_NEEDED,
@@ -294,22 +370,36 @@ class EndpointResolver(
     }
 
     private fun interpretTxt(recordName: String, settings: EndpointSettings): Interpretation {
-        val result = dnsClient.query(recordName, DnsRecordType.TXT)
+        val result = queryFollowingAlias(recordName, DnsRecordType.TXT)
+        val failure = DnsFailure.from(result)
         if (!result.isSuccess) {
+            return Interpretation(
+                candidates = emptyList(),
+                rejected = listOf(RejectedRecord(recordName, failure.status.rejectionReason(), failure.detail)),
+                dnsFailure = failure,
+            )
+        }
+
+        // Only TXT payloads describe an address. A resolver may include a CNAME or other types in
+        // the same answer section, and interpreting those as a record value would invent a host.
+        val records = result.answers.filter { it.type == DnsRecordType.TXT }.map { it.value }
+        if (records.isEmpty()) {
+            val missing = failure.copy(status = DnsQueryStatus.EMPTY, detail = "the answer carried no TXT record")
             return Interpretation(
                 candidates = emptyList(),
                 rejected = listOf(
                     RejectedRecord(
                         recordName,
-                        EndpointRejectionReason.DNS_LOOKUP_FAILED,
-                        result.error ?: result.status.name,
+                        EndpointRejectionReason.DNS_NO_RECORD_OF_TYPE,
+                        "name exists but has no TXT record",
                     ),
                 ),
-                dnsFailed = true,
+                dnsFailure = missing,
             )
         }
+
         val parsed = TxtRecordInterpreter.interpret(
-            records = result.answers.map { it.value },
+            records = records,
             defaultPort = settings.defaultPort,
             preferredScheme = if (settings.preferHttps) EndpointScheme.HTTPS else EndpointScheme.HTTP,
         )
@@ -317,18 +407,13 @@ class EndpointResolver(
     }
 
     private fun interpretSrv(recordName: String, settings: EndpointSettings): Interpretation {
-        val result = dnsClient.query(recordName, DnsRecordType.SRV)
+        val result = queryFollowingAlias(recordName, DnsRecordType.SRV)
+        val failure = DnsFailure.from(result)
         if (!result.isSuccess) {
             return Interpretation(
                 candidates = emptyList(),
-                rejected = listOf(
-                    RejectedRecord(
-                        recordName,
-                        EndpointRejectionReason.DNS_LOOKUP_FAILED,
-                        result.error ?: result.status.name,
-                    ),
-                ),
-                dnsFailed = true,
+                rejected = listOf(RejectedRecord(recordName, failure.status.rejectionReason(), failure.detail)),
+                dnsFailure = failure,
             )
         }
 
@@ -344,26 +429,88 @@ class EndpointResolver(
         return Interpretation(ordered, parsed.rejected)
     }
 
+    /**
+     * Queries [recordName] and follows a `CNAME` once.
+     *
+     * Publishing the record on a name that is an alias of the real zone is common, and a resolver
+     * that returns only the alias is not an error. The second query is only made when the first one
+     * produced an alias and no answer, so nothing is spent in the normal case.
+     */
+    private fun queryFollowingAlias(recordName: String, type: DnsRecordType): DnsQueryResult {
+        val first = dnsClient.query(recordName, type)
+        if (first.status != DnsQueryStatus.EMPTY) return first
+        val alias = first.canonicalNames.firstOrNull() ?: return first
+
+        val second = dnsClient.query(alias, type)
+        return second.copy(attempts = first.attempts + second.attempts)
+    }
+
+    /** DNS level failure, kept separate so the message can name the stage that broke. */
+    private data class DnsFailure(
+        val status: DnsQueryStatus,
+        val detail: String?,
+        val trail: String,
+    ) {
+        companion object {
+            fun from(result: DnsQueryResult) = DnsFailure(
+                status = result.status,
+                detail = result.error,
+                trail = result.attemptTrail,
+            )
+        }
+    }
+
     private data class Interpretation(
         val candidates: List<EndpointCandidate>,
         val rejected: List<RejectedRecord>,
-        val dnsFailed: Boolean = false,
+        val dnsFailure: DnsFailure? = null,
         val serviceUnavailable: Boolean = false,
     ) {
         val isUsable: Boolean get() = candidates.isNotEmpty()
 
-        fun failureReason(mode: EndpointResolutionMode, recordName: String): Pair<EndpointRejectionReason, String> =
-            when {
-                serviceUnavailable -> EndpointRejectionReason.SRV_SERVICE_UNAVAILABLE to
-                    "The SRV record of $recordName reports the service as unavailable (target \".\")"
-
-                dnsFailed -> EndpointRejectionReason.DNS_LOOKUP_FAILED to
-                    "The $mode lookup for $recordName failed"
-
-                else -> EndpointRejectionReason.SRV_ALL_CANDIDATES_INVALID to
-                    "The $mode record of $recordName contained no usable address"
+        /**
+         * Turns the outcome into one precise reason and message.
+         *
+         * The DNS failures are deliberately kept apart: "the name does not exist", "the name has no
+         * TXT record", "the resolver answered with an error" and "no resolver could be reached"
+         * have four different fixes, and collapsing them into one message is what made the original
+         * failure impossible to diagnose.
+         */
+        fun failureReason(mode: EndpointResolutionMode, recordName: String): Failure {
+            if (serviceUnavailable) {
+                return Failure(
+                    EndpointRejectionReason.SRV_SERVICE_UNAVAILABLE,
+                    "The SRV record of $recordName reports the service as unavailable (target \".\")",
+                    retryable = false,
+                )
             }
+
+            dnsFailure?.let { failure ->
+                val diagnostics = "dns=${failure.status.name}" +
+                    failure.detail?.let { " ($it)" }.orEmpty() +
+                    (if (failure.trail.isNotBlank()) " | attempts=[${failure.trail}]" else "")
+                return Failure(
+                    reason = failure.status.rejectionReason(),
+                    message = failure.status.failureMessage(mode, recordName),
+                    retryable = failure.status.isRetryable,
+                    diagnostics = diagnostics,
+                )
+            }
+
+            return Failure(
+                EndpointRejectionReason.TXT_ALL_RECORDS_INVALID,
+                "The $mode record of $recordName contained no usable address",
+                retryable = false,
+            )
+        }
     }
+
+    private data class Failure(
+        val reason: EndpointRejectionReason,
+        val message: String,
+        val retryable: Boolean,
+        val diagnostics: String? = null,
+    )
 
     private sealed interface CandidateOutcome {
         /** Usable as is, no downgrade involved. */
@@ -380,7 +527,15 @@ class EndpointResolver(
         ) : CandidateOutcome
 
         /** The user has to accept a plaintext connection before this candidate can be used. */
-        data class NeedsConfirmation(val evaluation: FallbackEvaluation) : CandidateOutcome
+        data class NeedsConfirmation(
+            val evaluation: FallbackEvaluation,
+            val endpoint: ResolvedEndpoint,
+            /**
+             * Why HTTPS was refused. Carried along so the second pass can state the reason in the
+             * record it keeps and in the diagnostic trail, exactly as the downgrade branch does.
+             */
+            val httpsFailure: EndpointProbeFailure,
+        ) : CandidateOutcome
 
         data class Rejected(val failure: EndpointProbeFailure) : CandidateOutcome
     }

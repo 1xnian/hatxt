@@ -9,38 +9,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
-/** Outcome of one DNS query. */
-enum class DnsQueryStatus {
-    /** The resolver answered and returned at least one record of the requested type. */
-    NOERROR,
-
-    /** The resolver answered but the record set is empty. */
-    EMPTY,
-
-    /** The name does not exist. */
-    NXDOMAIN,
-
-    /** The resolver reported a server failure. A different provider may still answer. */
-    SERVER_FAILURE,
-
-    /** The request never produced an answer, for example because the device is offline. */
-    NETWORK_ERROR,
-
-    /** The response could not be parsed. */
-    MALFORMED,
-}
-
-/** Result of a DNS query. */
-data class DnsQueryResult(
-    val answers: List<DnsAnswer> = emptyList(),
-    val status: DnsQueryStatus = DnsQueryStatus.NETWORK_ERROR,
-    /** Resolver that produced the answer, for diagnostics. */
-    val provider: String? = null,
-    val error: String? = null,
-) {
-    val isSuccess: Boolean get() = status == DnsQueryStatus.NOERROR
-}
-
 /**
  * Resolves DNS records.
  *
@@ -52,15 +20,25 @@ interface DnsClient {
 }
 
 /**
- * DNS over HTTPS client speaking the JSON API used by Cloudflare and Google.
+ * DNS over HTTPS client speaking the JSON API (`application/dns-json`) used by every major public
+ * resolver.
  *
- * ## Why DNS over HTTPS and not the platform resolver
+ * ## Why DNS over HTTPS and not the platform resolver alone
  *
- * Android's `InetAddress`/`Network` APIs and OkHttp's `Dns` interface only resolve `A`/`AAAA`
- * records. They cannot query `SRV` or `TXT`, and the specification explicitly forbids assuming
- * otherwise. `android.net.DnsResolver` (API 29+) can query arbitrary types but requires manual
- * DNS wire format parsing and is unavailable on older devices. DoH is therefore used as the
- * transport, with a second provider as a fallback.
+ * Android's `InetAddress`/`Network` APIs and OkHttp's `Dns` interface only resolve `A`/`AAAA`, and
+ * `android.net.DnsResolver` only exposes types for `A`, `AAAA` and `HTTPS`. `TXT` and `SRV`
+ * therefore need another transport when the device's own resolver cannot be used, see
+ * [SystemDnsClient] and [RawUdpDnsClient] for those. DoH is the last resort, and it is the only
+ * transport that still works when a network rewrites or blocks plain DNS.
+ *
+ * ## Provider order matters
+ *
+ * The well known international resolvers are not reachable on every network. On a mainland-China
+ * connection `cloudflare-dns.com` and `dns.google` both fail while domestic resolvers answer in
+ * milliseconds, so the domestic ones are asked first and the international ones are kept as a
+ * fallback for everywhere else. A resolver that is blocked fails fast, and every attempt is
+ * recorded in [DnsQueryResult.attempts] so the reason is visible instead of being reported as a
+ * generic failure.
  *
  * Nothing is assumed about the response: every record is validated by [TxtRecordInterpreter] or
  * [SrvRecordInterpreter] before it can influence a URL.
@@ -69,6 +47,7 @@ class DohDnsClient(
     private val endpoints: List<String> = DEFAULT_ENDPOINTS,
     private val connectTimeoutMs: Int = DEFAULT_CONNECT_TIMEOUT_MS,
     private val readTimeoutMs: Int = DEFAULT_READ_TIMEOUT_MS,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) : DnsClient {
 
     override fun query(name: String, type: DnsRecordType): DnsQueryResult {
@@ -80,33 +59,39 @@ class DohDnsClient(
             )
         }
 
-        var lastResult: DnsQueryResult? = null
+        val attempts = mutableListOf<DnsAttempt>()
+        var best: DnsQueryResult? = null
+        var bestRank = Int.MIN_VALUE
+
         endpoints.forEach { endpoint ->
+            val started = clock()
             val result = try {
                 queryOnce(endpoint, normalizedName, type)
             } catch (e: IOException) {
-                DnsQueryResult(status = DnsQueryStatus.NETWORK_ERROR, provider = endpoint, error = e.message)
+                DnsQueryResult(status = DnsQueryStatus.NETWORK_ERROR, provider = endpoint, error = e.describeForDiagnostics())
             } catch (e: RuntimeException) {
-                DnsQueryResult(status = DnsQueryStatus.NETWORK_ERROR, provider = endpoint, error = e.message)
+                DnsQueryResult(status = DnsQueryStatus.NETWORK_ERROR, provider = endpoint, error = e.describeForDiagnostics())
+            }
+            val duration = clock() - started
+            attempts += DnsAttempt(providerName(endpoint), result.status, duration, result.error)
+
+            if (result.status == DnsQueryStatus.NOERROR) {
+                return result.copy(attempts = attempts.toList())
             }
 
-            when (result.status) {
-                DnsQueryStatus.NOERROR -> return result
-                DnsQueryStatus.EMPTY,
-                DnsQueryStatus.NXDOMAIN,
-                DnsQueryStatus.MALFORMED,
-                -> return result
-
-                DnsQueryStatus.SERVER_FAILURE,
-                DnsQueryStatus.NETWORK_ERROR,
-                -> lastResult = result
+            // EMPTY and NXDOMAIN do not stop the chain: resolvers disagree while a record
+            // propagates, and asking a second one costs a round trip that is already budgeted for.
+            val rank = rankOf(result.status)
+            if (rank > bestRank) {
+                bestRank = rank
+                best = result.copy(attempts = attempts.toList())
             }
         }
 
-        return lastResult ?: DnsQueryResult(
+        return (best ?: DnsQueryResult(
             status = DnsQueryStatus.NETWORK_ERROR,
             error = "No DNS over HTTPS provider configured",
-        )
+        )).copy(attempts = attempts.toList())
     }
 
     private fun queryOnce(endpoint: String, name: String, type: DnsRecordType): DnsQueryResult {
@@ -115,6 +100,7 @@ class DohDnsClient(
         val connection = url.openConnection() as HttpURLConnection
         connection.requestMethod = "GET"
         connection.setRequestProperty("Accept", "application/dns-json")
+        connection.setRequestProperty("User-Agent", USER_AGENT)
         connection.connectTimeout = connectTimeoutMs
         connection.readTimeout = readTimeoutMs
 
@@ -122,27 +108,64 @@ class DohDnsClient(
             val responseCode = connection.responseCode
             if (responseCode !in 200..299) {
                 return DnsQueryResult(
-                    status = DnsQueryStatus.NETWORK_ERROR,
-                    provider = endpoint,
-                    error = "DNS over HTTPS request failed with HTTP $responseCode",
+                    status = if (responseCode == 429) DnsQueryStatus.REFUSED else DnsQueryStatus.SERVER_FAILURE,
+                    provider = providerName(endpoint),
+                    error = "DNS over HTTPS request returned HTTP $responseCode",
                 )
             }
             val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-            return DohResponseParser.parse(body, endpoint)
+            return DohResponseParser.parse(body, providerName(endpoint))
         } finally {
             connection.disconnect()
         }
     }
 
-    companion object {
-        const val DEFAULT_CONNECT_TIMEOUT_MS = 8_000
-        const val DEFAULT_READ_TIMEOUT_MS = 8_000
+    /** Same ordering as the fallback chain: report the most actionable outcome. */
+    private fun rankOf(status: DnsQueryStatus): Int = when (status) {
+        DnsQueryStatus.NOERROR -> 100
+        DnsQueryStatus.EMPTY -> 90
+        DnsQueryStatus.NXDOMAIN -> 80
+        DnsQueryStatus.REFUSED -> 60
+        DnsQueryStatus.SERVER_FAILURE -> 50
+        DnsQueryStatus.MALFORMED -> 40
+        DnsQueryStatus.TIMEOUT -> 30
+        DnsQueryStatus.UNSUPPORTED -> 20
+        DnsQueryStatus.NETWORK_ERROR -> 10
+    }
 
-        /** Resolvers queried in order until one produces an authoritative answer. */
+    companion object {
+        const val USER_AGENT = "HomeAssistant-Android/endpoint-resolver"
+
+        /**
+         * A blocked resolver usually fails the TLS handshake immediately; a reachable one on a
+         * mobile network answers in well under a second. These values keep a dead provider from
+         * eating the whole lookup budget.
+         */
+        const val DEFAULT_CONNECT_TIMEOUT_MS = 3_000
+        const val DEFAULT_READ_TIMEOUT_MS = 4_000
+
+        /**
+         * Resolvers queried in order until one produces an authoritative answer.
+         *
+         * Domestic resolvers come first because they are the ones that answer on a mainland-China
+         * connection, where the international ones are routinely unreachable. Measured on such a
+         * connection: `doh.pub` answers in ~0.3s, `dns.alidns.com` in a few seconds,
+         * `cloudflare-dns.com` fails the TLS handshake instantly and `dns.google` times out.
+         * The order is part of the fix for "the same record resolves in `nslookup` but not in the
+         * app".
+         */
         val DEFAULT_ENDPOINTS: List<String> = listOf(
+            "https://doh.pub/dns-query",
+            "https://dns.alidns.com/resolve",
             "https://cloudflare-dns.com/dns-query",
             "https://dns.google/resolve",
         )
+
+        /** Short host label used in messages, for example `doh:doh.pub`. */
+        internal fun providerName(endpoint: String): String {
+            val host = endpoint.substringAfter("://").substringBefore('/')
+            return "doh:$host"
+        }
     }
 }
 
@@ -175,7 +198,10 @@ object DohResponseParser {
 
         val status = when (response.status) {
             0 -> if (response.answer.isNullOrEmpty()) DnsQueryStatus.EMPTY else DnsQueryStatus.NOERROR
+            2 -> DnsQueryStatus.SERVER_FAILURE
             3 -> DnsQueryStatus.NXDOMAIN
+            5 -> DnsQueryStatus.REFUSED
+            1 -> DnsQueryStatus.MALFORMED
             else -> DnsQueryStatus.SERVER_FAILURE
         }
 
@@ -183,23 +209,44 @@ object DohResponseParser {
             return DnsQueryResult(status = status, provider = provider)
         }
 
+        val canonicalNames = mutableListOf<String>()
         val answers = response.answer.orEmpty().mapNotNull { answer ->
             val type = DnsRecordType.fromCode(answer.type) ?: return@mapNotNull null
             val raw = answer.data ?: return@mapNotNull null
+            if (type == DnsRecordType.CNAME) {
+                raw.trim().trimEnd('.').takeIf { it.isNotEmpty() }?.let { canonicalNames += it }
+                return@mapNotNull null
+            }
             val value = if (type == DnsRecordType.TXT) normalizeTxtValue(raw) else raw.trim()
             if (value.isEmpty()) return@mapNotNull null
             DnsAnswer(type = type, value = value, name = answer.name, ttlSeconds = answer.ttl)
         }
 
         if (answers.isEmpty()) {
-            return DnsQueryResult(status = DnsQueryStatus.EMPTY, provider = provider)
+            return DnsQueryResult(
+                status = DnsQueryStatus.EMPTY,
+                provider = provider,
+                canonicalNames = canonicalNames,
+            )
         }
-        return DnsQueryResult(answers = answers, status = DnsQueryStatus.NOERROR, provider = provider)
+        return DnsQueryResult(
+            answers = answers,
+            status = DnsQueryStatus.NOERROR,
+            provider = provider,
+            canonicalNames = canonicalNames,
+        )
     }
 
     /**
      * Normalises a TXT payload: strips the enclosing quotes, unescapes `\"` and `\\`, and joins a
-     * record that DNS split into several character-strings with a single space.
+     * record that DNS split into several character-strings.
+     *
+     * RFC 1035 section 3.3.14 defines TXT-DATA as a sequence of character-strings whose value is the
+     * plain concatenation. The JSON API reports the pieces in zone-file presentation form, where
+     * they are quoted and separated by a space that is *not* part of the value, so the pieces are
+     * joined with no separator. That makes the JSON path produce exactly the same bytes the
+     * wire-format decoder in [DnsMessageCodec] produces, and it is why the TXT interpreter never has
+     * to guess about missing whitespace: any space it sees is really in the record.
      */
     fun normalizeTxtValue(raw: String): String {
         val trimmed = raw.trim()
@@ -207,7 +254,7 @@ object DohResponseParser {
 
         val chunks = QUOTED_CHUNK_REGEX.findAll(trimmed).map { unescape(it.groupValues[1]) }.toList()
         if (chunks.isEmpty()) return unescape(trimmed)
-        return chunks.joinToString(" ").trim()
+        return chunks.joinToString(separator = "").trim()
     }
 
     private fun unescape(value: String): String {

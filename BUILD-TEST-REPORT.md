@@ -307,7 +307,7 @@ ArtifactSelectionException: ... cannot choose between the following variants of 
 | **GitHub Actions 服务端运行** | **未执行**。本机没有 `gh` CLI，也没有可用 token，无法触发或查询 CI。工作流的正确性来自**逐条步骤本机复现**（§2/§3/§4），不是 CI 已跑绿。 |
 | `actions/checkout`、`setup-java`、`setup-gradle`、SDK 安装、artifact 上传 | 未在本机执行（属 CI 专属环节）。 |
 | 真机 / 模拟器安装运行 | 未做。仅做静态检查（包名、清单、DEX、ABI）。 |
-| 真实 DNS TXT / SRV 记录联通性 | 未做端到端外网验证；解析逻辑由 164 个单元测试覆盖，含 DoH JSON 解析。 |
+| 真实 DNS TXT / SRV 记录联通性 | **本轮已补做**，见 §9.2。上一版此处为「未做」，现已用真实记录 `hat.22345678.xyz` 与真实公共解析器完成端到端验证。 |
 | `:app:testMinimalDebugUnitTest` | 未在本机运行（工作流中为 `continue-on-error` 的参考步骤）。 |
 
 ### 规格中「无法从源码确认」的项（未擅自规定为唯一答案）
@@ -397,3 +397,112 @@ bash .github/scripts/apk-static-inspection.sh
 | GitHub Actions 工作流已重写 | ✅ | §6 |
 | **GitHub Actions 服务端已跑绿** | ⚠️ **未验证** | 本机无 `gh`/token，见 §7 |
 | 未声称通过未实际执行的测试 | ✅ | §7 逐项列明未执行事项 |
+
+---
+
+## 11. 本轮追加：DNS 查询故障修复的构建与测试结果
+
+本节是**追加**记录，不覆盖上面任何一版结论。完整定位过程与改动说明见
+[`DNS查询修复报告.md`](DNS查询修复报告.md)。
+
+### 11.1 构建结果（真实 Gradle 运行）
+
+| 步骤 | 命令 | 结果 |
+|---|---|---|
+| common 单元测试 | `:common:testDebugUnitTest` | `BUILD SUCCESSFUL in 8m 1s`，gradle exit=0 |
+| app 测试源集编译 | `:app:compileMinimalDebugUnitTestKotlin` | `BUILD SUCCESSFUL in 8m 3s`，gradle exit=0 |
+| APK 构建 | `:app:assembleMinimalDebug` | `BUILD SUCCESSFUL in 9m 49s`，gradle exit=0，116 tasks |
+
+APK 产物：
+
+```
+app/build/outputs/apk/minimal/debug/app-minimal-debug.apk
+字节数  : 78,817,432
+sha256  : 08336dd13fc5ccea0bda4e2fb1d103f2156b8cc1f1f5429315a0eee8ce0dc42f
+```
+
+静态检查（`zipfile` 直接读取，非推测）：
+
+* 2616 个条目，含 `AndroidManifest.xml` 与 25 个 `classes*.dex`；
+* v1 签名 `META-INF/CERT.RSA`、`CERT.SF`、`MANIFEST.MF` 均存在；
+* APK Signing Block（v2/v3）存在于偏移 78,570,736，块长 4088 字节；
+* `classes2.dex` 中确实包含本轮全部新类型：
+  `DnsMessageCodec`、`SystemDnsClient`、`RawUdpDnsClient`、`FallbackDnsClient`、
+  `TxtRecordInterpreter`、`HttpsFallbackPolicy`。
+
+### 11.2 测试结果
+
+`common` 单元测试整体：**1132 个用例，failures=0，errors=0，skipped=3**。
+
+动态地址解析相关 12 个测试类（合计 240 个用例）：
+
+| 测试类 | 用例 | 本轮变化 |
+|---|---|---|
+| `TxtRecordInterpreterTest` | 43 | 新增多种格式/拒绝用例 |
+| `EndpointResolverTest` | 32 | 新增错误分类、别名、明文提供用例 |
+| `HttpsFallbackPolicyTest` | 29 | 新增 `TLS_NOT_A_TLS_PEER` 与同意语义用例 |
+| `EndpointUrlFactoryTest` | 23 | — |
+| `EndpointStateMachineTest` | 18 | — |
+| `SrvRecordInterpreterTest` | 18 | — |
+| `DnsMessageCodecTest` | 16 | **本轮新增** |
+| `DohResponseParserTest` | 14 | 修正分片拼接期望 |
+| `EndpointConnectGateTest` | 10 | — |
+| `EndpointRefreshPolicyTest` | 10 | — |
+| `FallbackDnsClientTest` | 10 | **本轮新增** |
+| `RealDnsLookupTest` | 3 | **本轮新增**（默认关闭） |
+
+`skipped=3` 就是 `RealDnsLookupTest` 的三个用例，它们由
+`@EnabledIfEnvironmentVariable(named = "HA_REAL_DNS_TEST")` 门控，默认不联网。
+
+**真实 DNS 查询测试**（`HA_REAL_DNS_TEST=1`，`BUILD SUCCESSFUL in 29s`）的原样输出：
+
+```
+[real-dns] TXT hat.22345678.xyz -> NOERROR via 223.5.5.5:53
+[real-dns] attempts=[223.5.5.5:53=NOERROR(91ms)]
+[real-dns]   answer TXT hat.22345678.xyz ttl=... value=117.183.5.29:13481
+[real-dns] candidates=[EndpointCandidate(host=117.183.5.29, port=13481, scheme=HTTPS, path=null,
+             sourceRecord=117.183.5.29:13481, transport=UNSPECIFIED)]
+[real-dns] generated url=https://117.183.5.29:13481
+[real-dns] pass1 success=false url=null
+[real-dns] pass1 pending=http://117.183.5.29:13481
+[real-dns] pass1 error=PLAINTEXT_CONFIRMATION_REQUIRED / hat.22345678.xyz resolves to
+             http://117.183.5.29:13481, which does not serve HTTPS. …
+[real-dns] pass1 diagnostics=candidates=1 | lastProbeFailure=NONE
+             | httpsProbeOfOfferedEndpoint=TLS_NOT_A_TLS_PEER
+[real-dns] pass2 success=true url=http://117.183.5.29:13481
+[real-dns] GET http://117.183.5.29:13481 -> 200
+[real-dns] A www.qq.com -> NOERROR via 223.5.5.5:53
+[real-dns] canonical=[ins-r23tsuuf.ias.tencent-cloud.net, tra-kbagmtra.ias.tencent-cloud.net]
+```
+
+**这不是"构建成功"，是真实网络 I/O 的结果**：真实 UDP DNS 查询 → 真实解析 → 真实 TLS 探测失败分类
+→ 真实 HTTP 探测（`200`）。
+
+### 11.3 本轮新增的两个环境级障碍（已解决，供复现参考）
+
+1. **Windows 260 字符路径限制导致测试任务"假失败"。**
+   Gradle 用「全限定参数化测试名」拼 HTML 报告路径，在本项目里超出限制，
+   于是**所有测试都通过之后**，任务仍然 `BUILD FAILED`：
+
+   ```
+   Could not generate test report to '...\build\reports\tests\testDebugUnitTest'.
+     java.io.IOException: Couldn't delete ...Given-...-St-6VKC88GNK7U2E.html
+   ```
+
+   解决：用 `verification/short-reports.init.gradle.kts` 把报告输出改到 `C:/wbt/<module>/xml|html`。
+   这不是代码缺陷，但极易被误读成测试失败，所以必须显式说明。
+
+2. **环境变量传不进测试 JVM。**
+   Gradle daemon 在启动时固化环境，shell 里 `export HA_REAL_DNS_TEST=1` 不生效。
+   解决：用 `verification/real-dns.init.gradle.kts` 在 `projectsEvaluated` 里
+   对 `Test` 任务调用 `environment("HA_REAL_DNS_TEST", "1")`。
+
+### 11.4 本轮仍未验证的事项
+
+| 事项 | 状态 |
+|---|---|
+| 真机 / 模拟器上点击验证 | **未做**（本机无设备与可用镜像）。链路每一层已在 JVM 侧验证，但"点一下按钮"本身没有真机点击。 |
+| Android 上 OkHttp/Conscrypt 的 TLS 异常文本 | **未实测**。只实测了 JVM JSSE 文本 `Unsupported or unrecognized SSL message`（已固化为用例）。若 Android 给的是别的文本，会落入"有歧义 → 需要用户确认一次"，功能仍可用。 |
+| `SystemDnsClient` / `RawUdpDnsClient` 的网络行为 | 未在本机验证（依赖 Android API）。真实网络验证走的是同一套 `DnsMessageCodec` + 原始 UDP。 |
+| `:app:testMinimalDebugUnitTest` 全量 | 未运行（本机会因 Robolectric 沙箱死锁挂起，见 §7 与 `CRASH-ANALYSIS.md`）。改为编译 app 测试源集确认无编译级破坏。 |
+| GitHub Actions 服务端 | 仍未运行，同上。 |
