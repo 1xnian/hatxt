@@ -848,6 +848,7 @@
     <string name="shortcuts_tile_log_in">Log in to add your first shortcut</string>
     <string name="shortcuts_tile_no_tiles_yet">There are no shortcuts tiles added yet</string>
     <string name="shortcuts">Shortcuts</string>
+    <string name="shortcuts_v2_coming_soon">Shortcuts v2 — Coming soon</string>
     <string name="show">Show</string>
     <string name="show_on_map">Show on map</string>
     <string name="show_share_logs_summary">Sharing logs with the Home Assistant team will help to solve issues. Please share the logs only if you have been asked to do so by a Home Assistant developer</string>
@@ -1030,6 +1031,7 @@
     <string name="widget_background_type_dynamiccolor">Dynamic color</string>
     <string name="widget_background_type_transparent">Transparent</string>
     <string name="widget_button_image_description">Action button</string>
+    <string name="widget_button_field_dialog_title">Field</string>
     <string name="widget_camera_description">Picture widget</string>
     <string name="widget_camera_contentdescription">Image</string>
     <string name="widget_config_action_error">A custom component is preventing action data from loading.</string>

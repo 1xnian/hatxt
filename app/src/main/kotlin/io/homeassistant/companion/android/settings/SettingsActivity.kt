@@ -10,7 +10,7 @@ import android.view.ViewGroup
 import androidx.activity.viewModels
 import androidx.biometric.BiometricManager
 import androidx.core.content.IntentCompat
-import androidx.fragment.app.commit
+import androidx.fragment.app.commitNow
 import androidx.lifecycle.lifecycleScope
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -105,60 +105,69 @@ class SettingsActivity : BaseActivity() {
 
         if (savedInstanceState == null) {
             val settingsNavigation = IntentCompat.getParcelableExtra(intent, EXTRA_FRAGMENT, Deeplink::class.java)
+            // Resolving the arguments may need a suspending read (`serverManager.servers()`), so the
+            // `when` blocks run inside a coroutine. The *transaction itself* is committed
+            // synchronously with `commitNow()` rather than with the fire-and-forget `commit()`:
+            //
+            // The asynchronous commit left `R.id.content` empty until the main dispatcher got
+            // around to running it. On HyperOS the window is already visible at that point, and
+            // when the process is torn down in the meantime — MIUI's security centre does that to
+            // debug-signed packages, and the log of the reported device shows exactly that — the
+            // user is left looking at an empty frame. `commitNow()` places the fragment in the
+            // same frame, so the first drawn frame already carries the settings UI. The back stack
+            // is untouched and no `recreate()` is needed.
             lifecycleScope.launch {
-                supportFragmentManager.commit {
-                    replace(
-                        R.id.content,
-                        when (settingsNavigation) {
-                            Deeplink.Websocket -> if (serverManager.servers().size == 1) {
-                                WebsocketSettingFragment::class.java
-                            } else {
-                                SettingsFragment::class.java
-                            }
-                            Deeplink.Developer -> DeveloperSettingsFragment::class.java
-                            is Deeplink.HomeNetwork -> SsidFragment::class.java
-                            is Deeplink.EndpointAddress -> EndpointSettingsFragment::class.java
-                            Deeplink.NotificationHistory -> NotificationHistoryFragment::class.java
-                            is Deeplink.Sensor -> SensorDetailFragment::class.java
-                            is Deeplink.QSTile -> ManageTilesFragment::class.java
-                            Deeplink.AssistSettings -> AssistSettingsFragment::class.java
-                            Deeplink.Gestures -> GesturesFragment::class.java
-                            else -> SettingsFragment::class.java
-                        },
-                        when (settingsNavigation) {
-                            is Deeplink.HomeNetwork -> {
-                                Bundle().apply { putInt(SsidFragment.EXTRA_SERVER, settingsNavigation.serverId) }
-                            }
+                val fragmentClass = when (settingsNavigation) {
+                    Deeplink.Websocket -> if (serverManager.servers().size == 1) {
+                        WebsocketSettingFragment::class.java
+                    } else {
+                        SettingsFragment::class.java
+                    }
+                    Deeplink.Developer -> DeveloperSettingsFragment::class.java
+                    is Deeplink.HomeNetwork -> SsidFragment::class.java
+                    is Deeplink.EndpointAddress -> EndpointSettingsFragment::class.java
+                    Deeplink.NotificationHistory -> NotificationHistoryFragment::class.java
+                    is Deeplink.Sensor -> SensorDetailFragment::class.java
+                    is Deeplink.QSTile -> ManageTilesFragment::class.java
+                    Deeplink.AssistSettings -> AssistSettingsFragment::class.java
+                    Deeplink.Gestures -> GesturesFragment::class.java
+                    else -> SettingsFragment::class.java
+                }
+                val fragmentArgs = when (settingsNavigation) {
+                    is Deeplink.HomeNetwork -> {
+                        Bundle().apply { putInt(SsidFragment.EXTRA_SERVER, settingsNavigation.serverId) }
+                    }
 
-                            is Deeplink.EndpointAddress -> {
-                                Bundle().apply {
-                                    putInt(EndpointSettingsFragment.EXTRA_SERVER, settingsNavigation.serverId)
-                                }
-                            }
+                    is Deeplink.EndpointAddress -> {
+                        Bundle().apply {
+                            putInt(EndpointSettingsFragment.EXTRA_SERVER, settingsNavigation.serverId)
+                        }
+                    }
 
-                            is Deeplink.Sensor -> {
-                                SensorDetailFragment.newInstance(settingsNavigation.sensorId).arguments
-                            }
+                    is Deeplink.Sensor -> {
+                        SensorDetailFragment.newInstance(settingsNavigation.sensorId).arguments
+                    }
 
-                            is Deeplink.QSTile -> {
-                                val tileId = settingsNavigation.tileId
-                                Bundle().apply { putString("id", tileId) }
-                            }
+                    is Deeplink.QSTile -> {
+                        val tileId = settingsNavigation.tileId
+                        Bundle().apply { putString("id", tileId) }
+                    }
 
-                            Deeplink.Websocket -> {
-                                val servers = serverManager.servers()
-                                if (servers.size == 1) {
-                                    Bundle().apply { putInt(WebsocketSettingFragment.EXTRA_SERVER, servers[0].id) }
-                                } else {
-                                    null
-                                }
-                            }
+                    Deeplink.Websocket -> {
+                        val servers = serverManager.servers()
+                        if (servers.size == 1) {
+                            Bundle().apply { putInt(WebsocketSettingFragment.EXTRA_SERVER, servers[0].id) }
+                        } else {
+                            null
+                        }
+                    }
 
-                            else -> {
-                                null
-                            }
-                        },
-                    )
+                    else -> {
+                        null
+                    }
+                }
+                supportFragmentManager.commitNow {
+                    replace(R.id.content, fragmentClass, fragmentArgs)
                 }
             }
         }

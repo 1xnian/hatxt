@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    简体中文（中国大陆）翻译。
+
+    维护约定：
+      * 只翻译用户可见文案；协议名（TXT / SRV / DNS / WebSocket / TLS / Wi-Fi / NFC / IP）、
+        类名、日志标签以及服务器返回的自定义内容一律保留原文。
+      * 格式占位符（%1$s、%d、%1$d%% …）必须与 values/strings.xml 完全一致。
+      * 本文件由 tools/generate_zh_rCN.py 生成，请修改脚本词条后重新生成。
+-->
+<resources>
+    <string name="changelog_entry_assistant_volume_sensor">新增&lt;b&gt;助手音量&lt;/b&gt;传感器（Android 17+）</string>
+    <string name="changelog_entry_assistant_volume_command">新增用于设置&lt;b&gt;助手音量&lt;/b&gt;的通知指令（Android 17+）</string>
+    <string name="changelog_entry_health_connect">&lt;b&gt;Health Connect&lt;/b&gt;的睡眠时长现在会排除清醒和离床时间</string>
+    <string name="changelog_entry_entity_widgets">重做了&lt;b&gt;实体小组件&lt;/b&gt;的设置</string>
+    <string name="changelog_entry_media_player_widgets">重做了&lt;b&gt;媒体播放器小组件&lt;/b&gt;的设置</string>
+    <string name="changelog_entry_template_widgets">重做了&lt;b&gt;模板小组件&lt;/b&gt;的设置</string>
+    <string name="changelog_entry_todo_widgets">重做了&lt;b&gt;待办小组件&lt;/b&gt;的设置</string>
+    <string name="changelog_entry_matter_commissioning">重做了添加&lt;b&gt;Matter 设备&lt;/b&gt;的流程</string>
+    <string name="changelog_entry_assist">重做了&lt;b&gt;Assist&lt;/b&gt;弹出界面</string>
+    <string name="changelog_entry_tiles">重做了&lt;b&gt;磁贴&lt;/b&gt;的设置</string>
+    <string name="changelog_entry_gesture_action">新增手势操作：&lt;b&gt;在浏览器中打开页面&lt;/b&gt;</string>
+    <string name="changelog_entry_bug_fixes">各处问题修复与依赖更新</string>
+    <string name="changelog_entry_tonal_palette_sensor">新增用于动态配色的&lt;b&gt;色调板&lt;/b&gt;传感器（Android 12+）</string>
+</resources>

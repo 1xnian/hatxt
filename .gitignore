@@ -374,3 +374,7 @@ merged_results.sarif
 !.claude/skills
 !.claude/settings.json
 .cursor
+
+# Build artefacts and local analysis output produced while preparing this variant.
+# The APK is a build product; the analysis notes are working documents, not sources.
+deliverables/*.apk

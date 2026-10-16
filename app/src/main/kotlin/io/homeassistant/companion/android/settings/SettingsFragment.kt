@@ -135,7 +135,7 @@ class SettingsFragment(
                                 presenter.cancelSuggestion(requireContext(), suggestion.id)
                             }
                         }
-                        it.isVisible = suggestion != null
+                        it.isVisible = SettingsFeatureFlags.showSettingsSuggestion && suggestion != null
                     }
                 }
             }
@@ -201,7 +201,8 @@ class SettingsFragment(
 
         val isAutomotive = requireContext().isAutomotive()
 
-        findPreference<PreferenceCategory>("assist")?.isVisible = !isAutomotive
+        findPreference<PreferenceCategory>("assist")?.isVisible =
+            SettingsFeatureFlags.showAssistCategory && !isAutomotive
 
         findPreference<PreferenceCategory>("widgets")?.isVisible = !QuestUtil.isQuest && !isAutomotive
         findPreference<Preference>("manage_widgets")?.setOnPreferenceClickListener {
@@ -283,7 +284,7 @@ class SettingsFragment(
         }
 
         findPreference<Preference>("notification_history")?.let {
-            it.isVisible = true
+            it.isVisible = SettingsFeatureFlags.showNotificationHistory
             it.setOnPreferenceClickListener {
                 parentFragmentManager.commit {
                     replace(R.id.content, NotificationHistoryFragment::class.java, null)
@@ -333,7 +334,8 @@ class SettingsFragment(
 
         lifecycleScope.launch {
             findPreference<Preference>("wear_settings")?.let {
-                it.isVisible = SettingsWearDetection.hasAnyNodes(requireContext())
+                it.isVisible =
+                    SettingsFeatureFlags.showWearSettings && SettingsWearDetection.hasAnyNodes(requireContext())
                 it.setOnPreferenceClickListener {
                     startActivity(SettingsWearActivity.newInstance(requireContext()))
                     return@setOnPreferenceClickListener true
