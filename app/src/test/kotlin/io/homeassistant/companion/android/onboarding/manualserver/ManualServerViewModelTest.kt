@@ -4,6 +4,7 @@ import android.webkit.URLUtil
 import app.cash.turbine.turbineScope
 import io.homeassistant.companion.android.testing.unit.MainDispatcherJUnit5Extension
 import io.mockk.every
+import io.mockk.mockk
 import io.mockk.mockkStatic
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
@@ -22,7 +23,12 @@ class ManualServerViewModelTest {
 
     @BeforeEach
     fun setup() {
-        viewModel = ManualServerViewModel()
+        // The resolver collaborators are only used for txt:// and srv:// input, which these tests
+        // do not exercise, so relaxed mocks are enough here.
+        viewModel = ManualServerViewModel(
+            dnsClient = mockk(relaxed = true),
+            endpointProbe = mockk(relaxed = true),
+        )
     }
 
     @Test

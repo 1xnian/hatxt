@@ -1,6 +1,6 @@
 # HA Android 动态地址（TXT/SRV）APK 静态检查报告
 
-- 生成时间 (UTC)：2026-10-16T04:46:39Z
+- 生成时间 (UTC)：2026-10-16T07:05:39Z
 - 提交：`local`
 - 工作流运行：`local`
 - 运行器：`local` / `openjdk version "21.0.8" 2025-07-15 LTS`
@@ -10,7 +10,7 @@
 ## 1. 构建产物
 
 ```text
-app/build/outputs/apk/minimal/debug/app-minimal-debug.apk (75536735 bytes)
+app/build/outputs/apk/minimal/debug/app-minimal-debug.apk (75670931 bytes)
 app/build/outputs/apk/minimal/debug/output-metadata.json (464 bytes)
 ```
 
@@ -80,8 +80,8 @@ common/src/test/kotlin/io/homeassistant/companion/android/common/data/endpoint/T
 
 ```text
 路径：app/build/outputs/apk/minimal/debug/app-minimal-debug.apk
-大小：75536735 bytes
-SHA-256：30d84fffac9b9fa53d3ef8ce0e97fb293820fa02f368319cce9aad58e7e65238
+大小：75670931 bytes
+SHA-256：12407d556823364cb83580c8b6331025ec4ddb6ecd8bf32f117025dba10c4d15
 ```
 
 ## 6. 包名 / 标签 / 启动 Activity（badging）
@@ -1111,9 +1111,9 @@ classes3.dex: 0 处 endpoint 包引用
 classes4.dex: 0 处 endpoint 包引用
 classes5.dex: 0 处 endpoint 包引用
 classes6.dex: 0 处 endpoint 包引用
-classes7.dex: 0 处 endpoint 包引用
 classes8.dex: 14 处 endpoint 包引用
 classes9.dex: 0 处 endpoint 包引用
+classes7.dex: 0 处 endpoint 包引用
 合计：332
 ```
 
@@ -1412,6 +1412,10 @@ common/build/test-results/testDebugUnitTest/TEST-io.homeassistant.companion.andr
 tests="16" skipped="0" failures="0" errors="0"
 common/build/test-results/testDebugUnitTest/TEST-io.homeassistant.companion.android.util.UrlUtilTest.xml
 tests="66" skipped="0" failures="0" errors="0"
+app/build/test-results/testMinimalDebugUnitTest/TEST-io.homeassistant.companion.android.onboarding.manualserver.ManualServerViewModelTest.xml
+tests="3" skipped="0" failures="0" errors="0"
+app/build/test-results/testMinimalDebugUnitTest/TEST-io.homeassistant.companion.android.util.IgnoreViolationRulesTest.xml
+tests="4" skipped="0" failures="0" errors="0"
 ```
 
 ### 解析模块测试类

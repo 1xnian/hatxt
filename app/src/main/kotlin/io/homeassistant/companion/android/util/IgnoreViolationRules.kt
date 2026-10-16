@@ -26,6 +26,7 @@ val threadPolicyIgnoredViolationRules = listOf(
     IgnoreAndroidAutoRendererServiceDiskRead,
     IgnoreMiuiFontSettingsDiskRead,
     IgnoreMiuiTurboSchedMonitorDiskRead,
+    IgnoreMediatekBoostFwkDiskRead,
     IgnoreChromiumKeyStoreDiskWrite,
     IgnoreAppCompatPersistLocalesDiskReadWrite,
 )
@@ -306,6 +307,43 @@ private data object IgnoreAppCompatPersistLocalesDiskReadWrite : IgnoreViolation
                 it.className == "androidx.appcompat.app.AppCompatDelegateImpl" &&
                     it.methodName == "attachBaseContext2"
             }
+    }
+}
+
+/**
+ * Ignore a [DiskReadViolation] in MediaTek's boost framework (`com.mediatek.boostfwk`).
+ *
+ * On MediaTek devices (observed on a Redmi K70 Ultra / HyperOS, `com.mediatek.boostfwk`),
+ * the vendor's performance framework inspects the app from inside the touch-event pipeline:
+ *
+ * ```text
+ * android.os.strictmode.DiskReadViolation
+ *   java.io.File.exists()
+ *   com.mediatek.boostfwk.utils.Util.isGameApp()
+ *   com.mediatek.boostfwk.identify.scroll.ScrollIdentify.checkAppType()
+ *   com.mediatek.boostfwk.BoostModuleDispatcher...
+ *   android.view.ViewRootImpl$ViewPostImeInputStage.processPointerEvent()
+ * ```
+ *
+ * The vendor code runs on the app's main thread during
+ * [android.view.ViewRootImpl.ViewPostImeInputStage.processPointerEvent], so the StrictMode thread
+ * policy propagates into it and the `File.exists()` probe is reported back to the app even though
+ * it happens inside a vendor component that the app cannot control or replace. Because the policy
+ * is `detectAll()` and unmatched violations are fatal (`FailFast`), this killed the process on the
+ * first touch of any screen.
+ *
+ * The match is keyed on the vendor package prefix so every boostfwk module (`utils`, `identify`,
+ * `BoostModuleDispatcher`, ...) is covered, while a disk read whose stack contains no boostfwk
+ * frame is still fatal.
+ */
+private data object IgnoreMediatekBoostFwkDiskRead : IgnoreViolationRule {
+    @RequiresApi(Build.VERSION_CODES.P)
+    override fun shouldIgnore(violation: Violation): Boolean {
+        if (violation !is DiskReadViolation) return false
+
+        return violation.stackTrace.any {
+            it.className.startsWith("com.mediatek.boostfwk.")
+        }
     }
 }
 
