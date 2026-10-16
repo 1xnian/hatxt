@@ -30,8 +30,8 @@ The IP addresses above are documentation examples only.
 1. Create a new GitHub repository. Do not upload this ZIP as a single file.
 2. Extract the ZIP on your computer.
 3. Upload **the contents inside** the extracted `android-main` directory to the repository root, including the `.github` directory and `gradlew` file. Make sure `.github/workflows/build-txt-apk.yml` exists in the repository.
-4. Commit and push to `main` or `master`, or open the repository's **Actions** tab and run **Build HA Android TXT APK** using **Run workflow**.
-5. Open the completed workflow run and download the artifact named `home-assistant-txt-minimal-debug-apk`.
+4. Commit and push to `main` or `master`, or open the repository's **Actions** tab and run **Build HA Android dynamic address APK** using **Run workflow**.
+5. Open the completed workflow run and download the artifact named `home-assistant-dynamic-address-minimal-debug-apk`.
 6. Extract the artifact ZIP to get the APK and install it on your Android device.
 
 No GitHub secrets are required for this debug build. The workflow builds the `minimalDebug` variant and uploads the APK as an Actions artifact; it does not publish a GitHub Release.
@@ -41,7 +41,8 @@ No GitHub secrets are required for this debug build. The workflow builds the `mi
 - TXT is resolved when manually adding a server. This initial patch does not refresh a saved server URL continuously when the TXT record changes.
 - This only converts TXT content into an HTTP(S) URL. It does not implement Lucky STUN hole-punching. If the TXT value contains STUN-specific connection parameters rather than a directly reachable HTTP(S) endpoint, additional protocol support is required.
 - DNS lookup uses `https://cloudflare-dns.com/dns-query`, so the device needs access to Cloudflare's DNS-over-HTTPS endpoint.
-- This modified source has not yet been successfully built or device-tested in the preparation environment. Use the Actions result to verify the actual build. If it fails, open the workflow log and inspect the first Gradle compilation/configuration error.
+- This initial patch intended a `txt://` lookup only at manual server creation. The current resolver refreshes a saved server URL on a configurable schedule and validates before every login — see `README-动态地址解析.md`.
+- The statement below about this source never having been built applies to the *initial* patch only. The current tree has been built locally: `:app:assembleMinimalDebug` → `BUILD SUCCESSFUL in 4m 46s`, producing a 75,536,735-byte APK (SHA-256 `30d84fff…e65238`). See §9.1 of `README-动态地址解析.md`.
 
 ## Upstream project
 

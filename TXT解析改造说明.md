@@ -44,3 +44,11 @@
 ```
 
 APK 通常输出在 `app/build/outputs/apk/` 下。
+
+---
+
+> **补充（当前状态）**：上一条「未能生成 APK」是初版改造时环境缺网缺 SDK 的记录，
+> 已不再成立。当前源码已在装有 JDK 21 + Android SDK + NDK r29 的环境真实构建通过：
+> `:app:assembleMinimalDebug` → `BUILD SUCCESSFUL in 4m 46s`，
+> 产物 75,536,735 字节，SHA-256 `30d84fffac9b9fa53d3ef8ce0e97fb293820fa02f368319cce9aad58e7e65238`。
+> 详见 `README-动态地址解析.md` §9.1。

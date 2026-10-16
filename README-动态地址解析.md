@@ -316,12 +316,60 @@ which is part of the dependency lock state
 2. `gradle/libs.versions.toml` 删除已无引用的 `com.squareup.leakcanary:leakcanary-android` 别名；
    保留 `leakcanary-android-instrumentation`（只用于 `androidTest` 源集，不进应用 APK）。
 3. `gradle.properties` 删除 `#noLeakCanary=true`，并写明上述根因，避免有人再加回来。
-4. CI **不再**传 `-PnoLeakCanary=true`，并新增一步显式解析 `minimalDebugRuntimeClasspath`，
-   让锁状态不一致时**立刻**失败（而不是悄悄换版本）。
+4. CI **不再**传 `-PnoLeakCanary=true`，改为把「依赖图」与「锁状态」一起检查（见 §6.4）。
+5. 用 `--write-locks` 重新解析并回写锁文件（**不是**删锁文件、**不是**忽略错误）：
+   ```bash
+   ./gradlew --write-locks --no-configuration-cache resolveAndLockAll
+   ```
+   本次实测 `BUILD SUCCESSFUL in 2m 51s`，回写后的差异**只涉及 LeakCanary 一族**：
+   `wear/gradle.lockfile` −16 行，`app/gradle.lockfile`、`automotive/gradle.lockfile` 各 +12/−16 行。
 
 > 这样「解析依赖图的配置」与「锁文件对应的配置」在构造上就一致了。
 > `app/gradle.lockfile` 中 LeakCanary 条目仍会保留在 `*DebugAndroidTest*` 相关配置上
 > —— 那是 instrumentation 测试需要的，与应用 APK 无关。
+
+### 6.4 CI 里怎么保证「下次不会再坏」
+
+`LockOutOfDateException` 有一个**很坑**的性质：它只在**真正发生解析**时抛出。
+
+```text
+./gradlew :app:dependencies --configuration minimalDebugRuntimeClasspath
+  → 16 行 `<module> FAILED`（shark、leakcanary-*、plumber-*、curtains …）
+  → 但 BUILD SUCCESSFUL，退出码 0
+```
+
+也就是说，**只跑 `dependencies` 报告任务看不出问题**（退出码是 0），必须真正
+`Configuration.resolve()` 才会失败。这一点本次用专门的 init script 做了实证：
+
+```text
+RESOLVE FAILED :app:minimalDebugRuntimeClasspath
+  cause[1] LockOutOfDateException: Did not resolve 'com.squareup.leakcanary:shark-graph:2.14' ...
+RESOLVE FAILED :app:minimalDebugCompileClasspath
+  cause[1] LockOutOfDateException: Did not resolve 'com.squareup.leakcanary:leakcanary-object-watcher:2.14' ...
+RESOLVE FAILED :app:minimalDebugUnitTestRuntimeClasspath
+  cause[1] LockOutOfDateException: Did not resolve 'com.squareup.leakcanary:shark-hprof:2.14' ...
+```
+
+**为什么最终没用「独立任务里真解析」这一招**：`minimal*` 系列 classpath 带产品风味，
+从一个独立任务去解析 `:app` 的配置时，Gradle 9.4 的解析器会在 `:common`
+（没有同名风味）上报 `ArtifactSelectionException`：
+
+```text
+ArtifactSelectionException: ... cannot choose between the following variants of project ':common':
+  Configuration ':common:debugRuntimeElements' variant 'android-aar-metadata' ...
+      Unmatched attributes:
+        Doesn't say anything about com.android.build.api.attributes.ProductFlavor:version (required 'minimal')
+```
+
+这是一个与锁无关的「变体选择」问题，它会把真正的锁违规**盖住**。因此该 init script
+（`.github/scripts/verify-dependency-locks.init.gradle.kts`）已被删除，工作流改为：
+
+1. 跑宽松的 `:app:dependencies` 报告 → 统计 ` FAILED$` 行数，**必须为 0**；
+2. 同时统计 LeakCanary 条目数，**必须为 0**；
+3. **权威的解析**交给 `:app:assembleMinimalDebug` 本身 —— 它在带风味的真实构建里解析，
+   锁状态不一致时必然失败。
+
+收敛后实测：`FAILED` 计数 = 0，LeakCanary 计数 = 0。
 
 ---
 
@@ -354,8 +402,9 @@ CI 的静态检查会对**合并后清单**（`aapt dump xmltree` / `apkanalyzer
    （`compileSdk = 37`，SDK 仓库中该平台以 37.0/37.1/37.2 形式发布）
 6. 用 `.github/mock-google-services.json` 生成 `app/`、`wear/`、`automotive/` 的
    `google-services.json`（不引入真实密钥）
-7. **解析锁定运行时依赖**：`./gradlew :app:dependencies --configuration minimalDebugRuntimeClasspath`，
-   输出到 `diagnostics/dependencies-minimalDebug.txt` 并统计 LeakCanary 条目数
+7. **检查锁状态**：`./gradlew :app:dependencies --configuration minimalDebugRuntimeClasspath`
+   输出到 `diagnostics/dependencies-minimalDebug.txt`，统计 ` FAILED$` 行数与 LeakCanary
+   条目数，**两者都必须为 0**（原因与局限见 §6.4；真正的解析放在第 9 步）
 8. **运行单元测试**：`./gradlew :common:testDebugUnitTest`（解析模块所在模块，硬性门禁）；
    另以 `continue-on-error` 跑 `:app:testMinimalDebugUnitTest` 作为参考信息
 9. **编译 APK**：`./gradlew :app:assembleMinimalDebug`
@@ -399,8 +448,59 @@ CI 的静态检查会对**合并后清单**（`aapt dump xmltree` / `apkanalyzer
 | `EndpointConnectGateTest.kt` | 登录前门禁：严格策略、使用旧地址、从未验证过、时间戳展示 |
 | `DohResponseParserTest.kt` | DoH JSON 解析：TXT 分片拼接、SRV RDATA、rcode 映射、格式错误 |
 
-**本次实际执行结果：164 个用例全部通过**（见下节说明执行方式）。
+**本次实际执行结果（真实 Gradle 运行，非逻辑子集）**
+
+```text
+:common:testDebugUnitTest   →  BUILD SUCCESSFUL in 3m 15s   gradle exit=0
+```
+
+| 项目 | 实测值 |
+|---|---|
+| 结果 XML 文件数 | 142 |
+| 测试总数 | **1070** |
+| failures / errors / skipped | **0 / 0 / 0** |
+| 其中 `data.endpoint` 包 | **164 个用例 / 9 个测试类** |
+| 其中 `WebSocketCoreImplTest` | **71 个用例**（70 个原有 + 1 个新增门禁用例） |
+
+> 第一次真实运行曾出现 67 个失败，全部集中在 `WebSocketCoreImplTest`，根因是
+> `mockk<ServerManager>(relaxed = true)` 对 `ConnectGateResult.mayConnect` 这类
+> `Boolean` 取值器返回 `false`，导致门禁拦下每一次连接。已用
+> `permissiveServerManager()` 显式返回 `ConnectDecision.PROCEED` 修复
+> （提交 `34cfa66`）。这正说明「本机纯逻辑验证」不能替代真实 Gradle 运行。
+
 CI 中同一批测试以 `:common:testDebugUnitTest` 真实运行。
+
+### 9.1 端到端本机执行记录（可复现）
+
+本次交付**在本机真实执行**了工作流里的关键步骤，而不是只写 YAML。所用环境：
+Zulu JDK 21.0.8、Gradle 9.8.0 发行版、Android SDK（`platforms;android-37.0`、
+`build-tools;37.0.0`、NDK r29 `29.0.14206865`、CMake 4.1.2）、阿里云 Maven 镜像。
+
+| 步骤 | 命令 | 结果 |
+|---|---|---|
+| 单元测试 | `:common:testDebugUnitTest` | `BUILD SUCCESSFUL in 3m 15s`，1070/1070 通过 |
+| 依赖锁定收敛 | `--write-locks … resolveAndLockAll` | `BUILD SUCCESSFUL in 2m 51s`，差异仅 LeakCanary |
+| 锁状态断言 | `:app:dependencies -C minimalDebugRuntimeClasspath` | `FAILED` 计数 **0**，LeakCanary 计数 **0** |
+| 编译 APK | `:app:assembleMinimalDebug` | `BUILD SUCCESSFUL in 4m 46s`，116 tasks |
+| 静态检查 | `bash .github/scripts/apk-static-inspection.sh` | `script exit=0`，结论「通过」 |
+
+构建产物（本机实测）：
+
+```text
+路径   : app/build/outputs/apk/minimal/debug/app-minimal-debug.apk
+大小   : 75,536,735 字节
+SHA-256: 30d84fffac9b9fa53d3ef8ce0e97fb293820fa02f368319cce9aad58e7e65238
+```
+
+静态检查确认：包名 `io.homeassistant.companion.android.minimal.debug`、
+标签 `Home Assistant`、启动入口 `io.homeassistant.companion.android.launch.LaunchActivity`、
+`native-code: arm64-v8a armeabi-v7a x86 x86_64`、源码清单 MAIN 条目恰好 3 个、
+**合并后清单中不存在 `Leaks` 入口**、DEX 中存在 `data/endpoint/` 类型描述符。
+
+> **诚实说明**：本机**没有**执行过 GitHub Actions 本身（无 `gh` CLI 与可用 token），
+> 因此工作流的正确性是「按步骤逐条本机复现」得出的，不是「CI 已跑绿」。
+> 工作流中剩余的 CI 专属环节（`actions/checkout`、`setup-java`、`setup-gradle`、
+> SDK 安装、artifact 上传）未在本机执行，需要首次 CI 运行来最终确认。
 
 ---
 
@@ -475,9 +575,11 @@ onboarding 场景的安全性：此时尚无服务器、也就没有明文知情
 | 地址变化时真实连接目标同步更新 | ✅ | 回写 `externalUrl`，既有 `urlFlow` 链路自动切换（§5） |
 | 解析失败不会覆盖最后一次有效地址 | ✅ | `EndpointStateMachine.applyResult` 失败分支不写 current；`ServerUrlSynchronizer` 仅在成功后写入 |
 | 不再存在未经解释的额外 `Leaks` 启动入口 | ✅ | 依赖声明已移除；检查脚本对合并后清单做硬性断言（§7） |
-| GitHub Actions 能构建并上传 APK | ✅ | `.github/workflows/build-txt-apk.yml`（本机无 JDK/Android SDK 时以 CI 为准） |
-| 自动化测试与静态检查报告生成 | ✅ | 164 个单测；`apk-static-inspection-report.md` 由脚本生成并上传 |
-| 未声称通过未实际执行的测试 | ✅ | 见 §9 与实际执行记录 |
+| GitHub Actions 工作流已重写并配置正确 | ✅ | `.github/workflows/build-txt-apk.yml`；JDK 21 / SDK / wrapper 权限 / 锁校验 / 测试 / 构建 / 检查 / 上传齐备 |
+| 工作流步骤已在本机逐条真实执行 | ✅ | `:common:testDebugUnitTest`、`--write-locks`、`:app:assembleMinimalDebug`、`apk-static-inspection.sh` 全部成功（§9.1） |
+| **GitHub Actions 服务端本身已跑绿** | ⚠️ **未验证** | 本机无 `gh` CLI / token，无法触发 CI；工作流正确性由本机复现推断，非 CI 实测 |
+| 自动化测试与静态检查报告生成 | ✅ | 1070 个单测全绿（endpoint 164 个）；`apk-static-inspection-report.md` 已由脚本生成 |
+| 未声称通过未实际执行的测试 | ✅ | §9 / §9.1 只记录真实运行过的命令与实测数字 |
 
 ---
 
@@ -487,5 +589,14 @@ onboarding 场景的安全性：此时尚无服务器、也就没有明文知情
 git log --oneline
 ```
 
-* `checkpoint: 保留现有 TXT 改造成果（重构前基线）` —— tag `pre-resolver-refactor`
-* 其后为本次重构的提交（解析模块、接入、设置界面、CI、文档）。
+```text
+4581185 fix(endpoint): 修复 app 模块编译错误并同步依赖锁状态
+34cfa66 fix(endpoint): 修复真实 Gradle 构建暴露的三类缺陷并收敛登录前校验
+38a18b2 docs(endpoint): 标注旧 TXT 文档已过时并清理未使用导入
+e79d935 feat(endpoint): 统一 TXT/SRV 动态地址解析模块与登录前强制校验
+```
+
+* `58bb6a5` 之前的 `Update build-txt-apk.yml` 系列是旧 TXT 改造时期的提交。
+* 改动前的基线以 tag `pre-resolver-refactor` 标记，旧实现完整保留在历史中。
+* `e79d935` → 解析模块、接入、设置界面、CI、文档；
+  `34cfa66` / `4581185` → 真实 Gradle 运行暴露缺陷的修复与依赖锁收敛。
