@@ -27,6 +27,7 @@ val threadPolicyIgnoredViolationRules = listOf(
     IgnoreMiuiFontSettingsDiskRead,
     IgnoreMiuiTurboSchedMonitorDiskRead,
     IgnoreMiuiEnterpriseFrameworkDiskRead,
+    IgnoreMiuiAppLockSnapshotDiskRead,
     IgnoreMediatekBoostFwkDiskReadWrite,
     IgnoreChromiumKeyStoreDiskWrite,
     IgnoreAppCompatPersistLocalesDiskReadWrite,
@@ -308,6 +309,50 @@ private data object IgnoreAppCompatPersistLocalesDiskReadWrite : IgnoreViolation
                 it.className == "androidx.appcompat.app.AppCompatDelegateImpl" &&
                     it.methodName == "attachBaseContext2"
             }
+    }
+}
+
+/**
+ * Ignore a [DiskReadViolation] in MIUI's app-lock snapshot check (`com.miui.server.AccessController`).
+ *
+ * On MIUI / HyperOS (observed on a Redmi K70 Ultra), whenever the system is about to start an
+ * Activity — including the *system permission dialog* shown through `com.lbe.security.miui` —
+ * the window transition checks whether the app snapshot should be hidden by the MIUI app lock.
+ * That check (`AppTransitionInjector.disableSnapshotForApplock`) calls
+ * `com.miui.server.AccessController.haveAccessControlPassword`, which performs a plain
+ * `File.exists()` — a disk read — on the binder thread inside the app's process:
+ *
+ * ```text
+ * android.os.strictmode.DiskReadViolation
+ *   java.io.File.exists()
+ *   com.miui.server.AccessController.haveAccessControlPassword(AccessController.java:457)
+ *   com.miui.server.SecurityManagerService.haveAccessControlPassword(SecurityManagerService.java:522)
+ *   com.android.server.wm.AppTransitionInjector.disableSnapshotForApplock(AppTransitionInjector.java:1558)
+ *   com.android.server.wm.ActivityRecord.addStartingWindow(ActivityRecord.java:2863)
+ *   com.android.server.wm.Task.startActivityLocked(Task.java:6104)
+ *   com.android.server.wm.ActivityStarter.execute(ActivityStarter.java:953)
+ *   com.android.server.wm.ActivityTaskManagerService.startActivity(ActivityTaskManagerService.java:1442)
+ *   android.app.IActivityTaskManager$Stub.onTransact(IActivityTaskManager.java:1286)
+ * ```
+ *
+ * Because the app's StrictMode thread policy propagates across the binder call, the violation is
+ * reported back to the app and — with `FailFast` active — the process called `System.exit(1)` at
+ * the exact moment the permission dialog was about to appear. The app was relaunched, requested
+ * permissions again, the dialog was shown again, and the process died again: the user perceived
+ * an instant return to the launcher ("crash") on every first launch.
+ *
+ * The check lives entirely in vendor system code and is beyond application control. The rule is
+ * scoped to [DiskReadViolation] and to the `com.miui.server.` prefix: any other vendor framework,
+ * or a disk read from the app itself, is still fatal.
+ */
+private data object IgnoreMiuiAppLockSnapshotDiskRead : IgnoreViolationRule {
+    @RequiresApi(Build.VERSION_CODES.P)
+    override fun shouldIgnore(violation: Violation): Boolean {
+        if (violation !is DiskReadViolation) return false
+
+        return violation.stackTrace.any {
+            it.className.startsWith("com.miui.server.")
+        }
     }
 }
 

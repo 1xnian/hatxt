@@ -122,6 +122,29 @@ class IgnoreViolationRulesTest {
         ),
     )
 
+    /**
+     * Verbatim frames of the `DiskReadViolation` from `ha-permission-crash.txt` (Redmi K70 Ultra,
+     * HyperOS): when the system shows the permission dialog (`com.lbe.security.miui`), MIUI's
+     * app-lock snapshot check runs `File.exists()` on the binder thread inside the app process
+     * while the Activity is started (`System.exit called, status: 1` followed).
+     */
+    private val miuiAppLockSnapshotDiskRead = diskReadViolation(
+        StackTraceElement("android.os.StrictMode\$AndroidBlockGuardPolicy", "onReadFromDisk", "StrictMode.java", 1666),
+        StackTraceElement("libcore.io.BlockGuardOs", "access", "BlockGuardOs.java", 74),
+        StackTraceElement("java.io.UnixFileSystem", "checkAccess", "UnixFileSystem.java", 313),
+        StackTraceElement("java.io.File", "exists", "File.java", 813),
+        StackTraceElement("com.miui.server.AccessController", "haveAccessControlPassword", "AccessController.java", 457),
+        StackTraceElement("com.miui.server.SecurityManagerService", "haveAccessControlPassword", "SecurityManagerService.java", 522),
+        StackTraceElement("com.android.server.wm.AppTransitionInjector", "disableSnapshotForApplock", "AppTransitionInjector.java", 1558),
+        StackTraceElement("com.android.server.wm.ActivityRecordImpl", "allowTaskSnapshot", "ActivityRecordImpl.java", 533),
+        StackTraceElement("com.android.server.wm.ActivityRecord", "addStartingWindow", "ActivityRecord.java", 2863),
+        StackTraceElement("com.android.server.wm.Task", "startActivityLocked", "Task.java", 6104),
+        StackTraceElement("com.android.server.wm.ActivityStarter", "execute", "ActivityStarter.java", 953),
+        StackTraceElement("com.android.server.wm.ActivityTaskManagerService", "startActivity", "ActivityTaskManagerService.java", 1442),
+        StackTraceElement("android.app.IActivityTaskManager\$Stub", "onTransact", "IActivityTaskManager.java", 1286),
+        StackTraceElement("android.os.Binder", "execTransact", "Binder.java", 1282),
+    )
+
     // region MediaTek boost framework
 
     @Test
@@ -178,6 +201,40 @@ class IgnoreViolationRulesTest {
         assertFalse(
             threadPolicyIgnoredViolationRules.any { it.shouldIgnore(enterpriseDiskWrite) },
             "The MIUI enterprise rule must stay scoped to DiskReadViolation",
+        )
+    }
+
+    // endregion
+
+    // region MIUI app-lock snapshot check
+
+    @Test
+    fun `MIUI app-lock snapshot disk read is ignored`() {
+        assertTrue(
+            threadPolicyIgnoredViolationRules.any { it.shouldIgnore(miuiAppLockSnapshotDiskRead) },
+            "The vendor app-lock snapshot disk read must not be fatal",
+        )
+    }
+
+    @Test
+    fun `MIUI app-lock snapshot rule does not ignore a disk write`() {
+        val appLockDiskWrite = diskWriteViolation(
+            StackTraceElement("libcore.io.BlockGuardOs", "write", "BlockGuardOs.java", -2),
+            StackTraceElement("com.miui.server.AccessController", "haveAccessControlPassword", "AccessController.java", -2),
+        )
+        assertFalse(
+            threadPolicyIgnoredViolationRules.any { it.shouldIgnore(appLockDiskWrite) },
+            "The app-lock rule must stay scoped to DiskReadViolation",
+        )
+    }
+
+    @Test
+    fun `Exactly one rule covers the MIUI app-lock snapshot disk read`() {
+        val matching = threadPolicyIgnoredViolationRules.filter { it.shouldIgnore(miuiAppLockSnapshotDiskRead) }
+        assertEquals(
+            1,
+            matching.size,
+            "Only the app-lock rule may match a com.miui.server. frame",
         )
     }
 
