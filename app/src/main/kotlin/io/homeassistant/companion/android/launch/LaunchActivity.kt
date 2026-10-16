@@ -53,6 +53,7 @@ import io.homeassistant.companion.android.util.PLAY_SERVICES_FLAVOR_DOC_URL
 import io.homeassistant.companion.android.util.PlayServicesAvailability
 import io.homeassistant.companion.android.util.compose.HAApp
 import io.homeassistant.companion.android.util.compose.navigateToUri
+import timber.log.Timber
 import io.homeassistant.companion.android.util.enableEdgeToEdgeCompat
 import io.homeassistant.companion.android.websocket.WebsocketManager
 import javax.inject.Inject
@@ -247,11 +248,18 @@ class LaunchActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        Timber.i(
+            "PermissionDiag: LaunchActivity onResume (pid=%d, finishing=%s)",
+            android.os.Process.myPid(),
+            isFinishing,
+        )
         SensorWorker.start(this)
         lifecycleScope.launch {
             WebsocketManager.start(this@LaunchActivity)
+            Timber.d("PermissionDiag: running launch checks (location disabled / local network)")
             checkLocationDisabled()
             checkLocalNetworkPermission()
+            Timber.i("PermissionDiag: launch checks done")
         }
     }
 

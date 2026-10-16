@@ -4,6 +4,7 @@ import android.car.Car
 import android.car.drivingstate.CarUxRestrictionsManager
 import android.content.Intent
 import android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -17,6 +18,7 @@ import io.homeassistant.companion.android.util.enableEdgeToEdgeCompat
 import javax.inject.Inject
 import kotlin.math.absoluteValue
 import kotlinx.coroutines.launch
+import timber.log.Timber
 
 @AndroidEntryPoint
 open class BaseActivity : AppCompatActivity() {
@@ -33,6 +35,13 @@ open class BaseActivity : AppCompatActivity() {
         lifecycleScope.launch {
             lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 permissionRequestMediator.eventFlow.collect { permissionToRequest ->
+                    Timber.i(
+                        "PermissionDiag: requesting %s from %s (resumed=%s, finishing=%s)",
+                        permissionToRequest,
+                        this@BaseActivity.javaClass.simpleName,
+                        lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED),
+                        isFinishing,
+                    )
                     ActivityCompat.requestPermissions(
                         this@BaseActivity,
                         arrayOf(permissionToRequest),
@@ -43,13 +52,38 @@ open class BaseActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Diagnostic hook: nothing in the app currently consumes the result of the legacy
+     * `requestPermissions` path, so the outcome of a system permission dialog is invisible in
+     * logs. Log the result (no sensitive data — permission name and grant state only) so a
+     * device run can show whether the dialog was answered and whether the process survived it.
+     */
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        val result = permissions.indices.joinToString { i ->
+            "${permissions[i]}=${if (grantResults[i] == PackageManager.PERMISSION_GRANTED) "GRANTED" else "DENIED"}"
+        }
+        Timber.i("PermissionDiag: result for request %d -> %s", requestCode, result)
+    }
+
     override fun onResume() {
         super.onResume()
+        Timber.d("PermissionDiag: %s onResume (finishing=%s)", javaClass.simpleName, isFinishing)
         registerListener()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        Timber.d("PermissionDiag: %s onPause (finishing=%s)", javaClass.simpleName, isFinishing)
     }
 
     override fun onStop() {
         super.onStop()
+        Timber.d("PermissionDiag: %s onStop (finishing=%s)", javaClass.simpleName, isFinishing)
         carRestrictionManager?.unregisterListener()
         car?.disconnect()
         car = null

@@ -128,6 +128,16 @@ open class HomeAssistantApplication : Application() {
         }
 
         Timber.i("Running ${BuildConfig.VERSION_NAME} on SDK $SdkVersion")
+        // Startup diagnostic: every fresh Application instance prints one line with the PID.
+        // If the app "returns to the desktop" and the next log line comes from a *new* PID with
+        // no crash/FailFast in between, the process was killed externally (e.g. MIUI security
+        // centre). If the same PID logs an exit first, it is the app itself leaving.
+        Timber.i(
+            "PermissionDiag: process start pid=%d pkg=%s debug=%s",
+            android.os.Process.myPid(),
+            BuildConfig.APPLICATION_ID,
+            BuildConfig.DEBUG,
+        )
 
         registerActivityLifecycleCallbacks(LifecycleHandler)
         registerEndpointRefreshLifecycle()
