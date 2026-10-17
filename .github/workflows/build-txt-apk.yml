@@ -1,7 +1,8 @@
 name: Build HA Android dynamic address APK
 
 # Builds the minimal release APK (R8 code shrinking enabled), runs the unit tests of the dynamic
-# (TXT/SRV) endpoint resolver and verifies the produced APK instead of trusting the source tree.
+# (TXT/SRV) endpoint resolver, verifies the produced APK, and publishes the signed APK to GitHub
+# Releases (prerelease) with a human-readable changelog.
 #
 # Why this workflow exists in this shape:
 #   * The previous revision passed -PnoLeakCanary=true while the committed dependency lock state had
@@ -23,7 +24,7 @@ on:
     branches: [main, master]
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: dynamic-address-apk-${{ github.ref }}
@@ -42,6 +43,17 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+
+      - name: Compute build timestamp (Beijing time)
+        id: ts
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Used both as the "beta" suffix in the APK version name and as the Release tag.
+          # Beijing time (UTC+8) so the stamp matches the user's local clock.
+          TS="$(TZ=Asia/Shanghai date +%Y%m%d-%H%M%S)"
+          echo "ts=$TS" >> "$GITHUB_OUTPUT"
+          echo "tag=beta$TS" >> "$GITHUB_OUTPUT"
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -138,6 +150,8 @@ jobs:
           ./gradlew :app:testMinimalDebugUnitTest --stacktrace
 
       - name: Build Minimal Release APK (R8 enabled)
+        env:
+          BUILD_TIMESTAMP: ${{ steps.ts.outputs.ts }}
         shell: bash
         run: |
           set -euo pipefail
@@ -146,6 +160,7 @@ jobs:
           # main-thread I/O regression introduced by app code is still caught on device.
           # Signing uses the committed test keystore (app/keystore/ha-test.keystore) by default, so
           # every build shares one signature and testers can update over the existing install.
+          # BUILD_TIMESTAMP (Beijing time) becomes the "beta<ts>" suffix of the APK version name.
           ./gradlew :app:assembleMinimalRelease --stacktrace
 
       - name: Static APK inspection
@@ -198,3 +213,44 @@ jobs:
             */build/reports/**
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Read APK version for release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK_META="app/build/outputs/apk/minimal/release/output-metadata.json"
+          VER="$(python3 -c "import json;d=json.load(open('$APK_META'));print(d['elements'][0]['versionName'])")"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to GitHub Releases
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ts.outputs.tag }}
+          name: HA Android 测试版 ${{ steps.ts.outputs.tag }}
+          body: |
+            ## Home Assistant Android 测试版（R8 压缩）
+
+            基于 Home Assistant Android 官方代码构建的测试版 APK。
+
+            **版本**：${{ steps.notes.outputs.version }}
+            **构建来源**：commit `${{ github.sha }}` — [查看 CI 运行](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            ### 本版特性
+            - R8 代码压缩已开启，APK 体积约 18 MB
+            - 仅包含 arm64-v8a 架构（适配主流手机）
+            - 使用固定测试签名，**可直接覆盖安装**，无需先卸载
+            - StrictMode 闪退已修复（仅当违规来自 App 自身代码时才拦截）
+
+            ### 安装说明
+            1. 下载下方 `app-minimal-release.apk`
+            2. 手机允许「未知来源」安装
+            3. 同签名可直接覆盖旧版；若提示签名冲突，先卸载旧版再装
+
+            > ⚠️ 非官方构建，仅用于测试。
+          files: |
+            app/build/outputs/apk/**/*.apk
+          prerelease: true
+          make_latest: false

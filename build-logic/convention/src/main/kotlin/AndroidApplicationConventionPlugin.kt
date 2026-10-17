@@ -45,15 +45,20 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                     applicationId = APPLICATION_ID
                     targetSdk = libs.versions.androidSdk.target.get().toInt()
 
-                    // Short, official-style version name, e.g. "2026.7.6-test17".
+                    // Short, official-style version name, e.g. "2026.7.6-beta20261017-235045".
                     // `project.version` cannot be used here: the Reckon plugin is applied from
                     // settings.gradle.kts and infers a long git-derived version for every project
                     // ("0.0.1-beta.0.1+20261017T111527Z"), which it forced in place of any version
                     // set in the root build.gradle.kts. The readable base comes from the
-                    // `appBaseVersion` Gradle property and each test build appends its own number.
+                    // `appBaseVersion` Gradle property and stays in sync with the upstream Home
+                    // Assistant Android release this fork is based on (update it when syncing
+                    // upstream). A "beta" + build-timestamp suffix (Beijing time, injected by CI as
+                    // BUILD_TIMESTAMP) marks these as test builds and keeps them distinct from the
+                    // official release line.
                     val testBuildNumber = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
                     val baseVersion = project.findProperty("appBaseVersion")?.toString() ?: "2026.7.6"
-                    versionName = "$baseVersion-test$testBuildNumber"
+                    val buildTimestamp = System.getenv("BUILD_TIMESTAMP") ?: "local"
+                    versionName = "$baseVersion-beta$buildTimestamp"
                     versionCode = testBuildNumber
 
                     val noStrictMode = project.findProperty("noStrictMode")?.toString()?.ifEmpty { "true" }
