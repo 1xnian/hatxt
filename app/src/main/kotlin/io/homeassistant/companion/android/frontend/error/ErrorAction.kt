@@ -40,7 +40,7 @@ fun errorActions(
     // unrecoverable error would not be fixed by a fresh port/IP.
     val dynamicRefresh: ErrorAction? = if (hasDynamicEndpoint) {
         ErrorAction(
-            labelRes = commonR.string.endpoint_refresh_now,
+            labelRes = commonR.string.endpoint_force_refresh_now,
             style = ErrorAction.Style.Primary,
             intent = ErrorActionIntent.RefreshEndpoint,
         )

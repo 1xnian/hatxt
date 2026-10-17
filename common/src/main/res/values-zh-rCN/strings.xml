@@ -582,9 +582,9 @@
     <string name="rate_limit_title">通知速率限制</string>
     <string name="refresh_external">刷新外部地址</string>
     <string name="refresh_internal">刷新内部地址</string>
-    <string name="endpoint_refresh_now">立即刷新动态地址</string>
-    <string name="endpoint_refresh_started">正在强制刷新域名、IP 与端口…</string>
-    <string name="endpoint_refresh_failed">动态地址刷新失败，请查看下方错误详情</string>
+    <string name="endpoint_force_refresh_now">立即刷新动态地址</string>
+    <string name="endpoint_force_refresh_started">正在强制刷新域名、IP 与端口…</string>
+    <string name="endpoint_force_refresh_failed">动态地址刷新失败，请查看下方错误详情</string>
     <string name="refresh_log">刷新日志</string>
     <string name="refresh">刷新</string>
     <string name="refresh_interval">刷新间隔</string>

@@ -1231,11 +1231,11 @@ internal class FrontendViewModel @VisibleForTesting constructor(
         viewModelScope.launch {
             val serverId = _viewState.value.serverId
             if (hasDynamicEndpoint(serverId)) {
-                _events.emit(FrontendEvent.ShowSnackbar(commonR.string.endpoint_refresh_started))
+                _events.emit(FrontendEvent.ShowSnackbar(commonR.string.endpoint_force_refresh_started))
                 val outcome = runCatching { serverManager.endpointRepository(serverId).refreshNow() }
                     .getOrNull()
                 if (outcome is EndpointRefreshOutcome.Applied && outcome.update is EndpointUpdate.Failed) {
-                    _events.emit(FrontendEvent.ShowSnackbar(commonR.string.endpoint_refresh_failed))
+                    _events.emit(FrontendEvent.ShowSnackbar(commonR.string.endpoint_force_refresh_failed))
                 }
             }
             startLoad()
