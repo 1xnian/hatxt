@@ -49,6 +49,19 @@ package io.homeassistant.companion.android.common.data.endpoint
  * would rewrite `117.183.5 29:13481` into `117.183.529:13481` and hand the WebView a host nobody
  * configured.
  */
+/**
+ * Ports read from TXT records when the host is fixed by the settings and only the port is dynamic.
+ *
+ * @property ports every distinct port that was read, in the order the records arrived.
+ * @property rejected records that carried no usable port.
+ */
+data class TxtPortParseResult(
+    val ports: List<Int>,
+    val rejected: List<RejectedRecord> = emptyList(),
+) {
+    val isUsable: Boolean get() = ports.isNotEmpty()
+}
+
 object TxtRecordInterpreter {
 
     /** Keys that carry the host part of a record. */
@@ -70,6 +83,9 @@ object TxtRecordInterpreter {
 
     /** `tcp://` prefix, handled before the generic URL path because `tcp` is not an HTTP scheme. */
     private val TCP_PREFIX_REGEX = Regex("^tcp://(.+)$", RegexOption.IGNORE_CASE)
+
+    /** `port=12345` / `port:12345`, the explicit single-value form of a published port. */
+    private val PORT_ASSIGNMENT_REGEX = Regex("^port\\s*[:=]\\s*(\\d{1,6})$", RegexOption.IGNORE_CASE)
 
     /**
      * Interprets every record and returns the usable candidates in preference order.
@@ -111,6 +127,91 @@ object TxtRecordInterpreter {
         }
 
         return CandidateParseResult(candidates.values.toList(), rejected)
+    }
+
+    /**
+     * Extracts **only the port** from raw TXT payloads.
+     *
+     * This is the fixed-host path. The reachable name comes from the settings, so the record is only
+     * asked for the port. That split is what makes "fixed domain + dynamic port" work with a
+     * STUN/relay rule: such a rule publishes the address it punched through (`ip:port`), and that IP
+     * is not the name the client connects to, but the port it reports is the port that is reachable
+     * through the fixed name.
+     *
+     * Accepted shapes:
+     *
+     * ```
+     * 12345                     bare port
+     * port=12345                key/value
+     * port:12345                colon form
+     * ip=1.2.3.4;port=12345     a bag that carries a port key
+     * 1.2.3.4:12345             ip:port, what a STUN rule publishes
+     * [2001:db8::1]:12345       bracketed IPv6 with a port
+     * https://1.2.3.4:12345     full URL
+     * https://1.2.3.4           full URL without a port, the scheme default is used
+     * tcp://1.2.3.4:12345       bare TCP endpoint, the port is still the port
+     * ```
+     *
+     * A record without a port is reported as [EndpointRejectionReason.MISSING_PORT] rather than
+     * falling back to a default: in this mode the port *is* the dynamic part, and quietly
+     * substituting 8123 would connect somewhere the user never published.
+     */
+    fun extractPorts(records: List<String?>): TxtPortParseResult {
+        val ports = LinkedHashSet<Int>()
+        val rejected = mutableListOf<RejectedRecord>()
+
+        records.forEach { raw ->
+            val record = raw?.trim().orEmpty()
+            if (record.isEmpty()) {
+                rejected += RejectedRecord(raw ?: "", EndpointRejectionReason.EMPTY_RECORD)
+                return@forEach
+            }
+
+            val port = extractPort(record)?.takeIf(EndpointUrlFactory::isValidPort)
+            if (port == null) {
+                rejected += RejectedRecord(record, EndpointRejectionReason.MISSING_PORT, "no port in record")
+            } else {
+                ports += port
+            }
+        }
+
+        return TxtPortParseResult(ports.toList(), rejected)
+    }
+
+    /** Reads the port out of a single record, or `null` when the record carries none. */
+    private fun extractPort(record: String): Int? {
+        // 1. `port=12345` / `port:12345`, and any key/value bag that carries a port key.
+        PORT_ASSIGNMENT_REGEX.matchEntire(record)?.let { match ->
+            return EndpointUrlFactory.parsePortOrNull(match.groupValues[1])
+        }
+        splitKeyValuePairs(record).firstOrNull { (key, _) -> key in PORT_KEYS }?.let { (_, value) ->
+            return EndpointUrlFactory.parsePortOrNull(value)
+        }
+
+        // 2. A full URL. `tcp://` is not an HTTP scheme, so instead of rejecting it the payload is
+        //    stripped and read as `host:port`: the port is the same either way.
+        if (record.contains("://")) {
+            EndpointUrlFactory.parseUrl(record)?.let { parsed ->
+                return parsed.port.takeIf(EndpointUrlFactory::isValidPort)
+            }
+            val remainder = record.substringAfter("://")
+            HOST_PORT_REGEX.matchEntire(remainder.substringBefore('/'))?.let { match ->
+                return EndpointUrlFactory.parsePortOrNull(match.groupValues[2])
+            }
+            return null
+        }
+
+        // 3. `host:port` / `[ipv6]:port`. The host is discarded on purpose: with a fixed host the
+        //    published address is not the name the client connects to, the port is what matters.
+        HOST_PORT_REGEX.matchEntire(record)?.let { match ->
+            return EndpointUrlFactory.parsePortOrNull(match.groupValues[2])
+        }
+
+        // 4. A bare port.
+        if (record.all { it.isDigit() }) {
+            return EndpointUrlFactory.parsePortOrNull(record)
+        }
+        return null
     }
 
     private fun parseRecord(

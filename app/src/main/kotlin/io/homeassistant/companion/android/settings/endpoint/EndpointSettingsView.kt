@@ -51,6 +51,8 @@ fun EndpointSettingsView(
     onModeChange: (EndpointResolutionMode) -> Unit,
     onTxtRecordNameChange: (String) -> Unit,
     onSrvRecordNameChange: (String) -> Unit,
+    onUseFixedHostChange: (Boolean) -> Unit,
+    onFixedHostChange: (String) -> Unit,
     onPresetIntervalChange: (Long) -> Unit,
     onCustomIntervalChange: (String) -> Unit,
     onPeriodicRefreshChange: (Boolean) -> Unit,
@@ -138,6 +140,45 @@ fun EndpointSettingsView(
                     style = MaterialTheme.typography.caption,
                     modifier = Modifier.padding(top = 4.dp),
                 )
+            }
+
+            // Only offered for the record based modes: it changes what the record is asked for, from
+            // the whole address down to just the port.
+            if (settings.mode.usesDnsRecord) {
+                SwitchRow(
+                    text = stringResource(commonR.string.endpoint_use_fixed_host),
+                    checked = settings.useFixedHost,
+                    onCheckedChange = onUseFixedHostChange,
+                )
+                Text(
+                    text = stringResource(commonR.string.endpoint_use_fixed_host_summary),
+                    style = MaterialTheme.typography.caption,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                if (settings.useFixedHost) {
+                    OutlinedTextField(
+                        value = settings.fixedHost,
+                        onValueChange = onFixedHostChange,
+                        label = { Text(stringResource(commonR.string.endpoint_fixed_host_title)) },
+                        placeholder = { Text(stringResource(commonR.string.endpoint_fixed_host_hint)) },
+                        isError = state.fixedHostError,
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (state.fixedHostError) {
+                        Text(
+                            text = stringResource(commonR.string.endpoint_fixed_host_invalid),
+                            color = MaterialTheme.colors.error,
+                            style = MaterialTheme.typography.caption,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    Text(
+                        text = stringResource(commonR.string.endpoint_fixed_host_summary),
+                        style = MaterialTheme.typography.caption,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
             }
 
             if (settings.mode.usesDnsRecord) {

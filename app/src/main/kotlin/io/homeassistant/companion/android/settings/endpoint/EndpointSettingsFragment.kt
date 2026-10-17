@@ -54,6 +54,8 @@ class EndpointSettingsFragment : Fragment() {
                         onModeChange = viewModel::setMode,
                         onTxtRecordNameChange = viewModel::setTxtRecordName,
                         onSrvRecordNameChange = viewModel::setSrvRecordName,
+                        onUseFixedHostChange = viewModel::setUseFixedHost,
+                        onFixedHostChange = viewModel::setFixedHost,
                         onPresetIntervalChange = viewModel::setPresetInterval,
                         onCustomIntervalChange = viewModel::setCustomInterval,
                         onPeriodicRefreshChange = viewModel::setPeriodicRefreshEnabled,

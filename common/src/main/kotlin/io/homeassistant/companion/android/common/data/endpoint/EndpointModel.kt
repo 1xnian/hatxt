@@ -255,6 +255,12 @@ enum class EndpointRejectionReason {
 
     /** A TLS service exists but its certificate is not trusted. Verification is never disabled. */
     TLS_CERTIFICATE_NOT_TRUSTED,
+
+    /** Fixed-host mode is enabled but no host was configured. */
+    FIXED_HOST_NOT_CONFIGURED,
+
+    /** The configured fixed host is not a usable host name or IP literal. */
+    INVALID_FIXED_HOST,
 }
 
 /** A record that was read from DNS but could not be turned into a usable endpoint. */
@@ -370,6 +376,25 @@ data class EndpointSettings(
     val staleAddressPolicy: EndpointStalePolicy = EndpointStalePolicy.USE_LAST_VALIDATED,
     /** Port used when a record does not carry one. */
     val defaultPort: Int = DEFAULT_HOME_ASSISTANT_PORT,
+
+    /**
+     * When true the host of every generated URL is [fixedHost] and the DNS record only supplies the
+     * port.
+     *
+     * This is what makes "fixed domain + dynamic port" work. A STUN/relay setup such as lucky
+     * publishes the address it punched through as `ip:port`, and that IP changes, while the name the
+     * client can actually reach (a domain behind a TLS terminator) stays the same. Keeping the host
+     * fixed and taking only the port from the record is what lets both halves be true at once.
+     */
+    val useFixedHost: Boolean = false,
+
+    /**
+     * Host name (or IP literal) used for every generated URL while [useFixedHost] is true.
+     *
+     * Kept separate from [txtRecordName]/[srvRecordName] on purpose: the record that carries the
+     * port and the name the client connects to are two different things in this setup.
+     */
+    val fixedHost: String = "",
 ) {
     /** Name of the record that is actually queried for the current [mode]. */
     val activeRecordName: String

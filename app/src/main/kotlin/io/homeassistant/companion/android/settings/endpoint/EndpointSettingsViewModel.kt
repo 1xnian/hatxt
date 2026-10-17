@@ -58,6 +58,8 @@ data class EndpointSettingsUiState(
     val recordNameError: Boolean = false,
     val intervalError: Boolean = false,
     val portError: Boolean = false,
+    /** Set when the fixed host is enabled and the entered host can never be a valid host or IP. */
+    val fixedHostError: Boolean = false,
 ) {
     /** True while the app has no server, so the screen shows an explanation instead of a form. */
     val isUnavailable: Boolean get() = !available
@@ -122,6 +124,8 @@ class EndpointSettingsViewModel @Inject constructor(
                     },
                     defaultPortInput = settings.defaultPort.toString(),
                     portError = !EndpointUrlFactory.isValidPort(settings.defaultPort),
+                    fixedHostError = settings.fixedHost.isNotBlank() &&
+                        !EndpointUrlFactory.isValidHost(settings.fixedHost.trim()),
                 )
             }
         }
@@ -135,6 +139,24 @@ class EndpointSettingsViewModel @Inject constructor(
 
     fun setSrvRecordName(value: String) = updateSettings {
         it.copy(srvRecordName = value).also { updated -> validateRecordName(updated) }
+    }
+
+    /**
+     * Turns "fixed host" on or off.
+     *
+     * While it is on the record is only asked for the port and [EndpointSettings.fixedHost] supplies
+     * the host of every generated URL, which is what makes a fixed domain with a dynamic port work.
+     */
+    fun setUseFixedHost(enabled: Boolean) = updateSettings { it.copy(useFixedHost = enabled) }
+
+    /**
+     * Sets the fixed host. A blank value is accepted while the user is still typing; what is flagged
+     * is a value that can never be a host, so the mistake is visible before the first lookup.
+     */
+    fun setFixedHost(value: String) {
+        val host = value.trim()
+        _state.update { it.copy(fixedHostError = host.isNotEmpty() && !EndpointUrlFactory.isValidHost(host)) }
+        updateSettings { it.copy(fixedHost = value) }
     }
 
     /** Applies one of [EndpointRefreshPolicy.PRESET_INTERVALS_SECONDS]. Clears a custom value. */

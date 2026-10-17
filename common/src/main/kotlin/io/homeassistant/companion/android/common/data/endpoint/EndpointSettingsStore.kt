@@ -73,6 +73,10 @@ internal class LocalStorageEndpointSettingsStore(
             defaultPort = localStorage.getInt(key(serverId, KEY_DEFAULT_PORT))
                 ?.takeIf(EndpointUrlFactory::isValidPort)
                 ?: defaults.defaultPort,
+            useFixedHost = localStorage.getBooleanOrNull(key(serverId, KEY_FIXED_HOST_ENABLED))
+                ?: defaults.useFixedHost,
+            fixedHost = localStorage.getString(key(serverId, KEY_FIXED_HOST))?.trim()
+                ?: defaults.fixedHost,
         )
     }
 
@@ -91,6 +95,8 @@ internal class LocalStorageEndpointSettingsStore(
         localStorage.putBoolean(key(serverId, KEY_ALLOW_HTTP_FALLBACK), sanitized.allowHttpFallback)
         localStorage.putString(key(serverId, KEY_STALE_POLICY), sanitized.staleAddressPolicy.name)
         localStorage.putInt(key(serverId, KEY_DEFAULT_PORT), sanitized.defaultPort)
+        localStorage.putBoolean(key(serverId, KEY_FIXED_HOST_ENABLED), sanitized.useFixedHost)
+        localStorage.putString(key(serverId, KEY_FIXED_HOST), sanitized.fixedHost.trim())
     }
 
     override suspend fun hasPlaintextConsent(serverId: Int): Boolean =
@@ -127,6 +133,8 @@ internal class LocalStorageEndpointSettingsStore(
         const val KEY_ALLOW_HTTP_FALLBACK = "allow_http_fallback"
         const val KEY_STALE_POLICY = "stale_policy"
         const val KEY_DEFAULT_PORT = "default_port"
+        const val KEY_FIXED_HOST_ENABLED = "fixed_host_enabled"
+        const val KEY_FIXED_HOST = "fixed_host"
         const val KEY_PLAINTEXT_CONSENT = "plaintext_consent"
         const val KEY_LAST_VALIDATED_URL = "last_validated_url"
         const val KEY_LAST_VALIDATED_AT = "last_validated_at"
@@ -141,6 +149,8 @@ internal class LocalStorageEndpointSettingsStore(
             KEY_ALLOW_HTTP_FALLBACK,
             KEY_STALE_POLICY,
             KEY_DEFAULT_PORT,
+            KEY_FIXED_HOST_ENABLED,
+            KEY_FIXED_HOST,
             KEY_PLAINTEXT_CONSENT,
             KEY_LAST_VALIDATED_URL,
             KEY_LAST_VALIDATED_AT,

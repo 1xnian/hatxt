@@ -1556,6 +1556,12 @@
     <string name="endpoint_srv_name_title">SRV record name</string>
     <string name="endpoint_srv_name_hint">_8123._tcp.example.com</string>
     <string name="endpoint_record_name_invalid">Enter a valid DNS name, for example ha.example.com.</string>
+    <string name="endpoint_use_fixed_host">Use a fixed host</string>
+    <string name="endpoint_use_fixed_host_summary">Keep the domain fixed and take only the port from the record. Use this when a STUN or relay rule publishes an address such as 1.2.3.4:12345 while the name you reach the server by never changes. The record may carry just the port (for example 12345), an ip:port pair, or a full URL.</string>
+    <string name="endpoint_fixed_host_title">Fixed host</string>
+    <string name="endpoint_fixed_host_hint">ha.example.com</string>
+    <string name="endpoint_fixed_host_invalid">Enter a valid host name or IP address.</string>
+    <string name="endpoint_fixed_host_summary">Every address the app builds uses this host, combined with the port that was read from the record.</string>
     <string name="endpoint_refresh_title">Refresh interval</string>
     <string name="endpoint_refresh_description">How often the app re-reads the DNS record while it is running. Android limits how often background work may run, so a background refresh can be delayed. The check before every login is never skipped, and a refresh that is not due yet never replaces a validated address.</string>
     <string name="endpoint_refresh_periodic_disabled">Periodic refresh is off. The record is still checked before every login.</string>

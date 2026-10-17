@@ -100,6 +100,16 @@ class EndpointResolver(
             )
         }
 
+        // The fixed host is checked before anything is queried. Without this a blank or malformed
+        // host would surface as "the record carried no port", sending the user to look at the wrong
+        // thing: the record is fine, it is the configured host that is missing.
+        if (settings.useFixedHost) {
+            validateFixedHost(settings.fixedHost)?.let { error ->
+                eventRecorder.record(EndpointLifecycleEvent.RESOLUTION_FAILED, "${error.reason}: ${error.message}")
+                return EndpointResolutionResult.failure(error, durationMs = clock() - started)
+            }
+        }
+
         val interpretation = when (settings.mode) {
             EndpointResolutionMode.TXT -> interpretTxt(recordName, settings)
             EndpointResolutionMode.SRV -> interpretSrv(recordName, settings)
@@ -348,6 +358,30 @@ class EndpointResolver(
         return null
     }
 
+    /**
+     * Checks the configured fixed host, so a missing or malformed one is named as the problem
+     * instead of the record that is being queried.
+     */
+    private fun validateFixedHost(fixedHost: String): EndpointResolutionError? {
+        val host = EndpointUrlFactory.normalizeHost(fixedHost)
+        if (host.isBlank()) {
+            return EndpointResolutionError(
+                reason = EndpointRejectionReason.FIXED_HOST_NOT_CONFIGURED,
+                message = "A fixed host is enabled but no host name is configured. " +
+                    "Enter the domain (or IP) the app should connect to.",
+                retryable = false,
+            )
+        }
+        if (!EndpointUrlFactory.isValidHost(host)) {
+            return EndpointResolutionError(
+                reason = EndpointRejectionReason.INVALID_FIXED_HOST,
+                message = "\"$host\" is not a valid host name or IP address.",
+                retryable = false,
+            )
+        }
+        return null
+    }
+
     /** Resolves a host name to an IP literal using A first, then AAAA. */
     private fun resolveToIp(host: String): String? {
         val normalized = EndpointUrlFactory.normalizeHost(host)
@@ -398,10 +432,27 @@ class EndpointResolver(
             )
         }
 
+        val scheme = if (settings.preferHttps) EndpointScheme.HTTPS else EndpointScheme.HTTP
+
+        // Fixed host: the record only supplies the port, and any host it carries is discarded. A
+        // STUN/relay rule publishes the address it punched through, which is not the name the client
+        // reaches the server by; the port is the part that is actually reachable through the fixed
+        // name, so that is the part that is taken.
+        if (settings.useFixedHost) {
+            val host = EndpointUrlFactory.normalizeHost(settings.fixedHost)
+            val ports = TxtRecordInterpreter.extractPorts(records)
+            return Interpretation(
+                candidates = ports.ports.map { port ->
+                    EndpointCandidate(host = host, port = port, scheme = scheme, sourceRecord = recordName)
+                },
+                rejected = ports.rejected,
+            )
+        }
+
         val parsed = TxtRecordInterpreter.interpret(
             records = records,
             defaultPort = settings.defaultPort,
-            preferredScheme = if (settings.preferHttps) EndpointScheme.HTTPS else EndpointScheme.HTTP,
+            preferredScheme = scheme,
         )
         return Interpretation(parsed.candidates, parsed.rejected)
     }
@@ -425,8 +476,28 @@ class EndpointResolver(
 
         val scheme = if (settings.preferHttps) EndpointScheme.HTTPS else EndpointScheme.HTTP
         val ordered = SrvRecordSelector.orderCandidates(parsed.records)
-            .map { SrvRecordInterpreter.toCandidate(it, scheme) }
-        return Interpretation(ordered, parsed.rejected)
+
+        // Fixed host: only the port is taken from the record and its target is ignored, for the same
+        // reason as in the TXT path. Records that publish the same port collapse into one candidate.
+        if (settings.useFixedHost) {
+            val host = EndpointUrlFactory.normalizeHost(settings.fixedHost)
+            return Interpretation(
+                candidates = ordered.distinctBy { it.port }.map { record ->
+                    EndpointCandidate(
+                        host = host,
+                        port = record.port,
+                        scheme = scheme,
+                        sourceRecord = record.sourceRecord,
+                    )
+                },
+                rejected = parsed.rejected,
+            )
+        }
+
+        return Interpretation(
+            ordered.map { SrvRecordInterpreter.toCandidate(it, scheme) },
+            parsed.rejected,
+        )
     }
 
     /**
