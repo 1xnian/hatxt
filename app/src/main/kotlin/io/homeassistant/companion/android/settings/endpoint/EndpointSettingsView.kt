@@ -53,6 +53,7 @@ fun EndpointSettingsView(
     onSrvRecordNameChange: (String) -> Unit,
     onUseFixedHostChange: (Boolean) -> Unit,
     onFixedHostChange: (String) -> Unit,
+    onBypassSystemDnsChange: (Boolean) -> Unit,
     onPresetIntervalChange: (Long) -> Unit,
     onCustomIntervalChange: (String) -> Unit,
     onPeriodicRefreshChange: (Boolean) -> Unit,
@@ -196,6 +197,17 @@ fun EndpointSettingsView(
                 Text(
                     text = stringResource(commonR.string.endpoint_default_port_summary),
                     style = MaterialTheme.typography.caption,
+                )
+
+                SwitchRow(
+                    text = stringResource(commonR.string.endpoint_bypass_system_dns),
+                    checked = settings.bypassSystemDnsCache,
+                    onCheckedChange = onBypassSystemDnsChange,
+                )
+                Text(
+                    text = stringResource(commonR.string.endpoint_bypass_system_dns_summary),
+                    style = MaterialTheme.typography.caption,
+                    modifier = Modifier.padding(bottom = 8.dp),
                 )
 
                 SectionTitle(commonR.string.endpoint_refresh_title)
@@ -388,6 +400,12 @@ private fun StatusSection(state: EndpointSnapshot, nowMillis: Long) {
     StatusRow(
         label = stringResource(commonR.string.endpoint_status_scheme),
         value = state.current?.scheme?.urlScheme ?: none,
+    )
+    StatusRow(
+        label = stringResource(commonR.string.endpoint_status_record_ttl),
+        value = state.recordTtlSeconds?.let { seconds ->
+            stringResource(commonR.string.endpoint_ttl_seconds, seconds)
+        } ?: unknown,
     )
     StatusRow(
         label = stringResource(commonR.string.endpoint_status_last_success),

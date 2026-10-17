@@ -207,8 +207,17 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
         publish()
 
         val consent = io { settingsStore.hasPlaintextConsent(serverId) }
+        // Only a refresh the user asked for goes to another resolver. The periodic refresh and the
+        // pre-connect gate stay on the device resolver: they run often and a second opinion is not
+        // worth the round trip there, whereas a manual refresh is exactly the case where the user is
+        // saying "the value I am looking at is wrong".
+        val bypassCache = settings.bypassSystemDnsCache && source == EndpointRefreshSource.MANUAL
         val result = withContext(ioDispatcher) {
-            resolver.resolve(settings, plaintextConsent = consent)
+            resolver.resolve(
+                settings = settings,
+                plaintextConsent = consent,
+                bypassSystemDnsCache = bypassCache,
+            )
         }
 
         if (!machine.isCurrent(token)) {

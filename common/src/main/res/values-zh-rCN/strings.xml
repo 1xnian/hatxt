@@ -1661,6 +1661,10 @@ Home Assistant 是开源家庭自动化平台，将本地控制与隐私放在�
     <string name="endpoint_fixed_host_hint">ha.example.com</string>
     <string name="endpoint_fixed_host_invalid">请输入有效的主机名或 IP 地址。</string>
     <string name="endpoint_fixed_host_summary">应用生成的每个地址都使用该域名，端口则取自记录解析出的动态端口。</string>
+    <string name="endpoint_status_record_ttl">记录 TTL</string>
+    <string name="endpoint_ttl_seconds">%1$d 秒（缓存答案最长还会被沿用这么久）</string>
+    <string name="endpoint_bypass_system_dns">刷新时跳过本机 DNS 缓存</string>
+    <string name="endpoint_bypass_system_dns_summary">手动刷新时，先问公共 DNS 再问本机 DNS。本机解析器在记录过期前会一直用缓存作答，开启后才能在记录刚变更时读到新值。当端口变化频繁而记录 TTL 较长时建议开启。</string>
     <string name="endpoint_refresh_title">刷新间隔</string>
     <string name="endpoint_refresh_description">应用运行期间重新读取 DNS 记录的频率。Android 会限制后台任务的执行频率，因此后台刷新可能被延后。每次登录前的检查绝不会跳过，而未到时间的刷新也不会替换已验证的地址。</string>
     <string name="endpoint_refresh_periodic_disabled">定时刷新已关闭。每次登录前仍会检查记录。</string>

@@ -159,6 +159,15 @@ class EndpointSettingsViewModel @Inject constructor(
         updateSettings { it.copy(fixedHost = value) }
     }
 
+    /**
+     * Makes a manual refresh ask a public resolver before the device's own.
+     *
+     * The device resolver keeps answering from its cache until the record's TTL runs out, so without
+     * this a record that just changed looks unchanged no matter how often the user refreshes.
+     */
+    fun setBypassSystemDnsCache(enabled: Boolean) =
+        updateSettings { it.copy(bypassSystemDnsCache = enabled) }
+
     /** Applies one of [EndpointRefreshPolicy.PRESET_INTERVALS_SECONDS]. Clears a custom value. */
     fun setPresetInterval(seconds: Long) {
         _state.update { it.copy(customIntervalInput = "", intervalError = false) }

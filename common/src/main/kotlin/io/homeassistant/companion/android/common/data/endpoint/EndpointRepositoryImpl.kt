@@ -7,6 +7,7 @@ import androidx.core.content.getSystemService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.homeassistant.companion.android.common.data.LocalStorage
 import io.homeassistant.companion.android.common.data.servers.ServerManager
+import io.homeassistant.companion.android.di.qualifiers.NamedCacheBypassDns
 import io.homeassistant.companion.android.di.qualifiers.NamedEndpointStorage
 import javax.inject.Inject
 import javax.inject.Provider
@@ -62,6 +63,7 @@ internal class TimberEndpointEventRecorder(
 internal class EndpointRepositoryFactory @Inject constructor(
     @NamedEndpointStorage private val localStorage: LocalStorage,
     private val dnsClient: DnsClient,
+    @NamedCacheBypassDns private val cacheBypassDnsClient: DnsClient,
     private val probe: EndpointProbe,
     private val connectivity: EndpointConnectivity,
     // A Provider avoids a construction cycle: the repository writes the resolved URL back into the
@@ -84,6 +86,7 @@ internal class EndpointRepositoryFactory @Inject constructor(
                     dnsClient = dnsClient,
                     probe = probe,
                     eventRecorder = recorder,
+                    cacheBypassDnsClient = cacheBypassDnsClient,
                 ),
                 connectivity = connectivity,
                 eventRecorder = recorder,

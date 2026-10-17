@@ -49,6 +49,12 @@ class EndpointResolver(
     private val probe: EndpointProbe = EndpointProbe.None,
     private val eventRecorder: EndpointEventRecorder = EndpointEventRecorder.NoOp,
     private val clock: () -> Long = System::currentTimeMillis,
+    /**
+     * Chain to use when a resolution asks to bypass the device resolver, see
+     * [EndpointSettings.bypassSystemDnsCache]. `null` falls back to [dnsClient], which keeps the
+     * resolver usable (and testable) without a second chain.
+     */
+    private val cacheBypassDnsClient: DnsClient? = null,
 ) {
 
     /** Resolves a fixed, user provided URL. No DNS record is queried in this mode. */
@@ -75,8 +81,15 @@ class EndpointResolver(
     fun resolve(
         settings: EndpointSettings,
         plaintextConsent: Boolean = false,
+        /**
+         * Ask a resolver other than the device's own first. A cached answer that has not expired yet
+         * is indistinguishable from a current one, so this is the only way a manual refresh can see a
+         * record that changed inside its TTL.
+         */
+        bypassSystemDnsCache: Boolean = false,
     ): EndpointResolutionResult {
         val started = clock()
+        val dns = if (bypassSystemDnsCache) cacheBypassDnsClient ?: dnsClient else dnsClient
         if (!settings.mode.usesDnsRecord) {
             return EndpointResolutionResult.failure(
                 EndpointResolutionError(
@@ -111,8 +124,8 @@ class EndpointResolver(
         }
 
         val interpretation = when (settings.mode) {
-            EndpointResolutionMode.TXT -> interpretTxt(recordName, settings)
-            EndpointResolutionMode.SRV -> interpretSrv(recordName, settings)
+            EndpointResolutionMode.TXT -> interpretTxt(dns, recordName, settings)
+            EndpointResolutionMode.SRV -> interpretSrv(dns, recordName, settings)
             EndpointResolutionMode.FIXED -> error("handled above")
         }
 
@@ -132,6 +145,7 @@ class EndpointResolver(
         }
 
         val rejected = interpretation.rejected.toMutableList()
+        val ttl = interpretation.ttlSeconds
         var lastFailure: EndpointProbeFailure = EndpointProbeFailure.NONE
         var certificateProblem = false
         val downgradeOptions = mutableListOf<CandidateOutcome.Downgrade>()
@@ -140,13 +154,18 @@ class EndpointResolver(
         // Pass 1 prefers an endpoint that works over HTTPS. A candidate that would need a plaintext
         // fallback is only remembered, so another candidate may still provide working HTTPS.
         interpretation.candidates.forEach { candidate ->
-            when (val outcome = evaluateCandidate(candidate, settings, plaintextConsent, rejected)) {
+            when (val outcome = evaluateCandidate(dns, candidate, settings, plaintextConsent, rejected)) {
                 is CandidateOutcome.Accepted -> {
                     eventRecorder.record(
                         EndpointLifecycleEvent.RESOLUTION_SUCCEEDED,
                         "${settings.mode} $recordName -> ${outcome.endpoint.url}",
                     )
-                    return EndpointResolutionResult.success(outcome.endpoint, rejected, clock() - started)
+                    return EndpointResolutionResult.success(
+                        outcome.endpoint,
+                        rejected,
+                        clock() - started,
+                        recordTtlSeconds = ttl,
+                    )
                 }
 
                 is CandidateOutcome.Downgrade -> downgradeOptions += outcome
@@ -195,7 +214,12 @@ class EndpointResolver(
                         EndpointLifecycleEvent.RESOLUTION_SUCCEEDED,
                         "${settings.mode} $recordName -> ${downgraded.url} (plaintext fallback)",
                     )
-                    return EndpointResolutionResult.success(downgraded, rejected, clock() - started)
+                    return EndpointResolutionResult.success(
+                        downgraded,
+                        rejected,
+                        clock() - started,
+                        recordTtlSeconds = ttl,
+                    )
                 }
 
                 // Plaintext answers, but using it is the user's decision. The address travels with
@@ -277,12 +301,13 @@ class EndpointResolver(
     }.joinToString(" | ")
 
     private fun evaluateCandidate(
+        dns: DnsClient,
         candidate: EndpointCandidate,
         settings: EndpointSettings,
         plaintextConsent: Boolean,
         rejected: MutableList<RejectedRecord>,
     ): CandidateOutcome {
-        val ip = resolveToIp(candidate.host)
+        val ip = resolveToIp(dns, candidate.host)
         if (ip == null) {
             rejected += RejectedRecord(
                 candidate.sourceRecord ?: candidate.host,
@@ -383,12 +408,12 @@ class EndpointResolver(
     }
 
     /** Resolves a host name to an IP literal using A first, then AAAA. */
-    private fun resolveToIp(host: String): String? {
+    private fun resolveToIp(dns: DnsClient, host: String): String? {
         val normalized = EndpointUrlFactory.normalizeHost(host)
         if (EndpointUrlFactory.isIpLiteral(normalized)) return normalized
 
         listOf(DnsRecordType.A, DnsRecordType.AAAA).forEach { type ->
-            val result = dnsClient.query(normalized, type)
+            val result = dns.query(normalized, type)
             if (!result.isSuccess) return@forEach
             result.answers.forEach { answer ->
                 val value = answer.value.trim().removeSurrounding("[", "]")
@@ -403,8 +428,12 @@ class EndpointResolver(
         return null
     }
 
-    private fun interpretTxt(recordName: String, settings: EndpointSettings): Interpretation {
-        val result = queryFollowingAlias(recordName, DnsRecordType.TXT)
+    private fun interpretTxt(
+        dns: DnsClient,
+        recordName: String,
+        settings: EndpointSettings,
+    ): Interpretation {
+        val result = queryFollowingAlias(dns, recordName, DnsRecordType.TXT)
         val failure = DnsFailure.from(result)
         if (!result.isSuccess) {
             return Interpretation(
@@ -446,6 +475,7 @@ class EndpointResolver(
                     EndpointCandidate(host = host, port = port, scheme = scheme, sourceRecord = recordName)
                 },
                 rejected = ports.rejected,
+                ttlSeconds = result.ttlSeconds,
             )
         }
 
@@ -454,11 +484,15 @@ class EndpointResolver(
             defaultPort = settings.defaultPort,
             preferredScheme = scheme,
         )
-        return Interpretation(parsed.candidates, parsed.rejected)
+        return Interpretation(parsed.candidates, parsed.rejected, ttlSeconds = result.ttlSeconds)
     }
 
-    private fun interpretSrv(recordName: String, settings: EndpointSettings): Interpretation {
-        val result = queryFollowingAlias(recordName, DnsRecordType.SRV)
+    private fun interpretSrv(
+        dns: DnsClient,
+        recordName: String,
+        settings: EndpointSettings,
+    ): Interpretation {
+        val result = queryFollowingAlias(dns, recordName, DnsRecordType.SRV)
         val failure = DnsFailure.from(result)
         if (!result.isSuccess) {
             return Interpretation(
@@ -491,12 +525,14 @@ class EndpointResolver(
                     )
                 },
                 rejected = parsed.rejected,
+                ttlSeconds = result.ttlSeconds,
             )
         }
 
         return Interpretation(
             ordered.map { SrvRecordInterpreter.toCandidate(it, scheme) },
             parsed.rejected,
+            ttlSeconds = result.ttlSeconds,
         )
     }
 
@@ -507,12 +543,16 @@ class EndpointResolver(
      * that returns only the alias is not an error. The second query is only made when the first one
      * produced an alias and no answer, so nothing is spent in the normal case.
      */
-    private fun queryFollowingAlias(recordName: String, type: DnsRecordType): DnsQueryResult {
-        val first = dnsClient.query(recordName, type)
+    private fun queryFollowingAlias(
+        dns: DnsClient,
+        recordName: String,
+        type: DnsRecordType,
+    ): DnsQueryResult {
+        val first = dns.query(recordName, type)
         if (first.status != DnsQueryStatus.EMPTY) return first
         val alias = first.canonicalNames.firstOrNull() ?: return first
 
-        val second = dnsClient.query(alias, type)
+        val second = dns.query(alias, type)
         return second.copy(attempts = first.attempts + second.attempts)
     }
 
@@ -536,6 +576,8 @@ class EndpointResolver(
         val rejected: List<RejectedRecord>,
         val dnsFailure: DnsFailure? = null,
         val serviceUnavailable: Boolean = false,
+        /** TTL the answering resolver reported, carried through so the UI can state it. */
+        val ttlSeconds: Long? = null,
     ) {
         val isUsable: Boolean get() = candidates.isNotEmpty()
 

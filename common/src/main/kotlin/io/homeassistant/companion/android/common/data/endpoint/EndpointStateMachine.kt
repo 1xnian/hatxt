@@ -193,6 +193,7 @@ class EndpointStateMachine(
                 lastError = null,
                 downgradedToHttp = endpoint.scheme == EndpointScheme.HTTP,
                 currentIsValidated = true,
+                recordTtlSeconds = result.recordTtlSeconds,
                 nextRefreshAtMillis = if (settings.mode.usesDnsRecord && settings.periodicRefreshEnabled) {
                     EndpointRefreshPolicy.nextRefreshAtMillis(now, interval, 0)
                 } else {

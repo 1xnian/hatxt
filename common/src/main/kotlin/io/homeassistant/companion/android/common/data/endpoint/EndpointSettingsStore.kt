@@ -77,6 +77,8 @@ internal class LocalStorageEndpointSettingsStore(
                 ?: defaults.useFixedHost,
             fixedHost = localStorage.getString(key(serverId, KEY_FIXED_HOST))?.trim()
                 ?: defaults.fixedHost,
+            bypassSystemDnsCache = localStorage.getBooleanOrNull(key(serverId, KEY_BYPASS_SYSTEM_DNS))
+                ?: defaults.bypassSystemDnsCache,
         )
     }
 
@@ -97,6 +99,7 @@ internal class LocalStorageEndpointSettingsStore(
         localStorage.putInt(key(serverId, KEY_DEFAULT_PORT), sanitized.defaultPort)
         localStorage.putBoolean(key(serverId, KEY_FIXED_HOST_ENABLED), sanitized.useFixedHost)
         localStorage.putString(key(serverId, KEY_FIXED_HOST), sanitized.fixedHost.trim())
+        localStorage.putBoolean(key(serverId, KEY_BYPASS_SYSTEM_DNS), sanitized.bypassSystemDnsCache)
     }
 
     override suspend fun hasPlaintextConsent(serverId: Int): Boolean =
@@ -135,6 +138,7 @@ internal class LocalStorageEndpointSettingsStore(
         const val KEY_DEFAULT_PORT = "default_port"
         const val KEY_FIXED_HOST_ENABLED = "fixed_host_enabled"
         const val KEY_FIXED_HOST = "fixed_host"
+        const val KEY_BYPASS_SYSTEM_DNS = "bypass_system_dns"
         const val KEY_PLAINTEXT_CONSENT = "plaintext_consent"
         const val KEY_LAST_VALIDATED_URL = "last_validated_url"
         const val KEY_LAST_VALIDATED_AT = "last_validated_at"
@@ -151,6 +155,7 @@ internal class LocalStorageEndpointSettingsStore(
             KEY_DEFAULT_PORT,
             KEY_FIXED_HOST_ENABLED,
             KEY_FIXED_HOST,
+            KEY_BYPASS_SYSTEM_DNS,
             KEY_PLAINTEXT_CONSENT,
             KEY_LAST_VALIDATED_URL,
             KEY_LAST_VALIDATED_AT,

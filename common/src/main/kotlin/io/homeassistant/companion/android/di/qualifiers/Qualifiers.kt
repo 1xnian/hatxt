@@ -25,6 +25,17 @@ annotation class NamedIntegrationStorage
 annotation class NamedEndpointStorage
 
 /**
+ * Qualifier for the DNS chain that **starts with a public resolver** instead of the device's own.
+ *
+ * The device resolver answers from its cache until a record's TTL expires, and a cached answer stops
+ * the chain, so a record that just changed keeps returning the old value. This chain is only used
+ * when the user explicitly refreshes and asked for the cache to be bypassed.
+ */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class NamedCacheBypassDns
+
+/**
  * Qualifier for [LocalStorage] dependencies related to application themes.
  */
 @Qualifier

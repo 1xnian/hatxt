@@ -88,9 +88,13 @@ class FallbackDnsClient(
             }
 
             if (result.status == DnsQueryStatus.NOERROR) {
+                // Shortest TTL wins: that is how long this whole answer may still come from a cache,
+                // which is the number that explains a value that refuses to change.
+                val ttl = result.ttlSeconds ?: result.answers.mapNotNull { it.ttlSeconds }.minOrNull()
                 return result.copy(
                     provider = result.provider ?: entry.name,
                     attempts = attempts.toList(),
+                    ttlSeconds = ttl,
                 )
             }
 

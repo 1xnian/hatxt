@@ -16,6 +16,7 @@ import io.homeassistant.companion.android.common.data.endpoint.FallbackDnsClient
 import io.homeassistant.companion.android.common.data.endpoint.OkHttpEndpointProbe
 import io.homeassistant.companion.android.common.data.endpoint.RawUdpDnsClient
 import io.homeassistant.companion.android.common.data.endpoint.SystemDnsClient
+import io.homeassistant.companion.android.di.qualifiers.NamedCacheBypassDns
 import javax.inject.Singleton
 
 /**
@@ -66,6 +67,39 @@ internal object EndpointModule {
                         DohDnsClient(endpoints = listOf(endpoint)),
                     ),
                 )
+            }
+        },
+    )
+
+    /**
+     * The same chain with the **public resolvers first** and the device resolver last.
+     *
+     * A cached answer stops the chain, so asking the device resolver first means a record that
+     * changed inside its TTL is never visible no matter how often the user refreshes: the local
+     * cache answers, and the public resolvers are never reached. Reversing the order is what makes a
+     * manual refresh able to see the new value.
+     */
+    @Provides
+    @Singleton
+    @NamedCacheBypassDns
+    fun provideCacheBypassDnsClient(@ApplicationContext context: Context): DnsClient = FallbackDnsClient(
+        clients = buildList {
+            DohDnsClient.DEFAULT_ENDPOINTS.forEach { endpoint ->
+                add(
+                    FallbackDnsClient.Entry(
+                        DohDnsClient.providerName(endpoint),
+                        DohDnsClient(endpoints = listOf(endpoint)),
+                    ),
+                )
+            }
+            add(
+                FallbackDnsClient.Entry(
+                    RawUdpDnsClient.PROVIDER,
+                    RawUdpDnsClient(AndroidDnsServerProvider(context)),
+                ),
+            )
+            SystemDnsClient.create(context)?.let { client ->
+                add(FallbackDnsClient.Entry(SystemDnsClient.PROVIDER, client))
             }
         },
     )

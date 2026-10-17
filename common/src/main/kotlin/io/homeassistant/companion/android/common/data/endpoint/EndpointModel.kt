@@ -180,6 +180,14 @@ data class DnsQueryResult(
     val attempts: List<DnsAttempt> = emptyList(),
     /** Targets of any `CNAME` the resolver returned alongside the answer. */
     val canonicalNames: List<String> = emptyList(),
+    /**
+     * Lowest TTL among the answers, in seconds: how long this answer may still be served from a
+     * cache. `null` when the resolver did not report one.
+     *
+     * It is what turns "the port did not change" from a guess into a statement: a long TTL means a
+     * changed record simply cannot be visible yet.
+     */
+    val ttlSeconds: Long? = null,
 ) {
     val isSuccess: Boolean get() = status == DnsQueryStatus.NOERROR
 
@@ -395,6 +403,19 @@ data class EndpointSettings(
      * port and the name the client connects to are two different things in this setup.
      */
     val fixedHost: String = "",
+
+    /**
+     * When true a **manual** refresh asks a public resolver before the device's own.
+     *
+     * The device resolver answers from its own cache until the record's TTL expires, and a cached
+     * answer stops the resolver chain, so a record that just changed keeps answering with the old
+     * value no matter how often the user refreshes. Querying a different resolver first gets a view
+     * that is not that cache.
+     *
+     * Only manual refreshes do this: the periodic refresh stays on the cheap local resolver, and the
+     * pre-connect gate must not add a round trip to every login.
+     */
+    val bypassSystemDnsCache: Boolean = false,
 ) {
     /** Name of the record that is actually queried for the current [mode]. */
     val activeRecordName: String
@@ -431,6 +452,13 @@ data class EndpointSnapshot(
     val consecutiveFailures: Int = 0,
     val downgradedToHttp: Boolean = false,
     /**
+     * TTL the resolver reported for the record on the last successful lookup, in seconds.
+     *
+     * A changed record cannot become visible before this expires, so it is the number that explains
+     * why a refresh keeps returning the same value.
+     */
+    val recordTtlSeconds: Long? = null,
+    /**
      * Whether [current] was produced by a successful resolution (or restored from one) instead of
      * being merely read back from the server configuration.
      *
@@ -465,6 +493,12 @@ data class EndpointResolutionResult(
      */
     val fallbackEvaluation: FallbackEvaluation? = null,
     /**
+     * TTL the answering resolver reported for the record, in seconds. Shown so a stale value can be
+     * recognised as "this answer is still cached for N more seconds" instead of "the port did not
+     * change".
+     */
+    val recordTtlSeconds: Long? = null,
+    /**
      * The plaintext endpoint the user could accept when [EndpointRejectionReason.PLAINTEXT_CONFIRMATION_REQUIRED]
      * is the error. It already answered over plaintext, so offering it is not a guess. The UI shows
      * exactly this address instead of asking the user to work it out and retype it.
@@ -476,12 +510,14 @@ data class EndpointResolutionResult(
             endpoint: ResolvedEndpoint,
             rejected: List<RejectedRecord> = emptyList(),
             durationMs: Long = 0,
+            recordTtlSeconds: Long? = null,
         ) = EndpointResolutionResult(
             success = true,
             endpoint = endpoint,
             error = null,
             rejected = rejected,
             durationMs = durationMs,
+            recordTtlSeconds = recordTtlSeconds,
         )
 
         fun failure(
