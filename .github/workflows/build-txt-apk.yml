@@ -1,8 +1,7 @@
 name: Build HA Android dynamic address APK
 
-# Builds the minimal RELEASE APK (R8 code shrinking + arm64-only native libraries), runs the unit
-# tests of the dynamic (TXT/SRV) endpoint resolver and verifies the produced APK instead of
-# trusting the source tree.
+# Builds the minimal debug APK, runs the unit tests of the dynamic (TXT/SRV) endpoint resolver and
+# verifies the produced APK instead of trusting the source tree.
 #
 # Why this workflow exists in this shape:
 #   * The previous revision passed -PnoLeakCanary=true while the committed dependency lock state had
@@ -32,7 +31,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build, test and inspect Minimal Release APK (R8)
+    name: Build, test and inspect Minimal Debug APK
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -138,33 +137,14 @@ jobs:
         run: |
           ./gradlew :app:testMinimalDebugUnitTest --stacktrace
 
-      - name: Create the signing keystore used by the release build
+      - name: Build Minimal Debug APK
         shell: bash
         run: |
           set -euo pipefail
-          # The release build type is signed with whatever keystore these environment variables point
-          # at (see AndroidApplicationConventionPlugin). No published identity exists here, so a
-          # throwaway keystore is generated for this run only. Signing is just what R8/apk signing
-          # requires; the APK installs directly because it is signed.
-          keytool -genkeypair -v \
-            -keystore ci-release.keystore \
-            -alias ci \
-            -keyalg RSA -keysize 2048 -validity 10950 \
-            -storepass ci-android -keypass ci-android \
-            -dname "CN=CI Test Build, OU=Test Builds, O=Home Assistant Fork, L=X, ST=X, C=CN"
-          {
-            echo "KEYSTORE_PATH=$PWD/ci-release.keystore"
-            echo "KEYSTORE_PASSWORD=ci-android"
-            echo "KEYSTORE_ALIAS=ci"
-            echo "KEYSTORE_ALIAS_PASSWORD=ci-android"
-          } >> "$GITHUB_ENV"
-
-      - name: Build the Minimal Release APK (R8 code shrinking enabled)
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Release + arm64-only ABI + R8 is what keeps this APK small; see app/build.gradle.kts.
-          ./gradlew :app:assembleMinimalRelease --stacktrace
+          # arm64-only via ndk.abiFilters in defaultConfig; StrictMode FailFast stays enabled so any
+          # main-thread I/O regression introduced by app code is still caught on device.
+          # R8 is deliberately off - see the note on the release build type in app/build.gradle.kts.
+          ./gradlew :app:assembleMinimalDebug --stacktrace
 
       - name: Static APK inspection
         if: always()
@@ -175,7 +155,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: home-assistant-dynamic-address-minimal-release-apk
+          name: home-assistant-dynamic-address-minimal-debug-apk
           path: app/build/outputs/apk/**/*.apk
           if-no-files-found: warn
           retention-days: 14

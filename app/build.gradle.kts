@@ -42,17 +42,19 @@ android {
         }
 
         named("release") {
-            // Enable R8 code shrinking: unused classes, methods and fields are stripped from the DEX
-            // and the remaining ones are renamed. Together with the single-ABI filter this is what
-            // brings the APK close to / below the size of the official releases. Debug is left
-            // unminified so it stays readable and fast to iterate on.
-            // Most libraries ship their own consumer keep rules; anything using reflection that is
-            // not covered by them has to be whitelisted in app/proguard-rules.pro.
-            isMinifyEnabled = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro",
-            )
+            // R8 is intentionally NOT enabled here.
+            //
+            // It was tried (combined with the single-ABI filter) and produced a 18.4 MiB APK, but the
+            // result was unusable: with no keep rules in this repository (app/proguard-rules.pro is
+            // still the untouched Android Studio template) almost every application and library class
+            // was stripped — only classes referenced from the manifest survived. The numbers speak for
+            // themselves ("androidx/compose" occurrences in the DEX went 58,506 -> 60, "retrofit" 350
+            // -> 0, "dagger" 1,399 -> 1), so the app crashed immediately with NoClassDefFoundError.
+            //
+            // The upstream project ships its releases unminified too, which is why the official
+            // app-minimal-release.apk is 46.4 MB. Enabling R8 here properly would mean building and
+            // validating a full keep-rule set first; don't flip this on without doing that.
+            isMinifyEnabled = false
         }
 
         // Variant kept for scripts/tasks that still ask for `debugArm64` by name. It is now
