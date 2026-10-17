@@ -156,8 +156,15 @@ class EndpointResolver(
 
         // Pass 1 prefers an endpoint that works over HTTPS. A candidate that would need a plaintext
         // fallback is only remembered, so another candidate may still provide working HTTPS.
+        //
+        // The host -> IP lookup deliberately uses the *normal* (device-first) resolver, not the cache
+        // bypass chain. Bypass only exists to defeat the cache for the dynamic record (the port); the
+        // host is fixed and resolves correctly through the device's own DNS. Routing the host lookup
+        // through the DoH-first bypass chain would let a public resolver answer first with an
+        // unreachable IP (for example the public side of a DDNS while the phone is on the LAN), which
+        // then fails the HTTPS probe and surfaces as "no usable address was found".
         interpretation.candidates.forEach { candidate ->
-            when (val outcome = evaluateCandidate(dns, candidate, settings, plaintextConsent, rejected)) {
+            when (val outcome = evaluateCandidate(dnsClient, candidate, settings, plaintextConsent, rejected)) {
                 is CandidateOutcome.Accepted -> {
                     eventRecorder.record(
                         EndpointLifecycleEvent.RESOLUTION_SUCCEEDED,
@@ -247,6 +254,7 @@ class EndpointResolver(
             else -> EndpointRejectionReason.SRV_ALL_CANDIDATES_INVALID
         }
         val rejectedSummary = describeRejected(rejected)
+        val diagnostics = describeDiagnostics(interpretation, lastFailure, rejectedSummary, pendingHttpsFailure)
         val message = when (reason) {
             EndpointRejectionReason.TLS_CERTIFICATE_NOT_TRUSTED ->
                 "The certificate of the resolved endpoint is not trusted; certificate verification is never disabled"
@@ -256,7 +264,10 @@ class EndpointResolver(
                     "Connecting to it would send your credentials unencrypted and needs your consent."
 
             else -> "The ${settings.mode.name} record of $recordName was read but no usable address was found." +
-                rejectedSummary?.let { " $it" }.orEmpty()
+                buildString {
+                    rejectedSummary?.let { append(" $it") }
+                    if (diagnostics.isNotBlank()) append(" [$diagnostics]")
+                }
         }
 
         eventRecorder.record(EndpointLifecycleEvent.RESOLUTION_FAILED, "$reason: $message")
