@@ -15,6 +15,18 @@ interface IgnoreViolationRule {
     fun shouldIgnore(violation: Violation): Boolean
 }
 
+/**
+ * Frames from the app's own package. A StrictMode violation is only treated as the app's own
+ * responsibility (and thus allowed to be fatal) when its stack trace contains at least one such
+ * frame. Violations with no app frame live entirely in vendor / framework code — reached through
+ * binder calls whose policy propagates into the app's thread — and cannot be fixed in app code, so
+ * they must never trigger FailFast.
+ */
+private const val APP_PACKAGE_PREFIX = "io.homeassistant.companion.android"
+
+private fun isAppOwnedViolation(violation: Violation): Boolean =
+    violation.stackTrace.any { it.className.startsWith(APP_PACKAGE_PREFIX) }
+
 object HAStrictMode {
     /**
      * This method enable strict mode (VM and Thread policies) with a custom configuration that is
@@ -39,20 +51,26 @@ object HAStrictMode {
                 .detectLeakedRegistrationObjects()
                 .penaltyListener(Executors.newSingleThreadExecutor()) { violation ->
                     val matched = vmPolicyIgnoredViolationRules.filter { it.shouldIgnore(violation) }
-                    if (matched.isEmpty()) {
-                        Timber.e(
-                            violation,
-                            "StrictModeDiag: FATAL VM violation %s on thread %s (no rule matched) — entering FailFast",
-                            violation.javaClass.simpleName,
-                            Thread.currentThread().name,
-                        )
-                        FailFast.failWith(violation)
-                    } else {
-                        Timber.w(
+                    when {
+                        matched.isNotEmpty() -> Timber.w(
                             "StrictModeDiag: ignored VM violation %s on thread %s via rule %s",
                             violation.javaClass.simpleName,
                             Thread.currentThread().name,
                             matched.first()::class.java.simpleName,
+                        )
+                        isAppOwnedViolation(violation) -> {
+                            Timber.e(
+                                violation,
+                                "StrictModeDiag: FATAL VM violation %s on thread %s (no rule matched) — entering FailFast",
+                                violation.javaClass.simpleName,
+                                Thread.currentThread().name,
+                            )
+                            FailFast.failWith(violation)
+                        }
+                        else -> Timber.w(
+                            "StrictModeDiag: ignored VM violation %s on thread %s via safety-net (no app frame, vendor/framework code)",
+                            violation.javaClass.simpleName,
+                            Thread.currentThread().name,
                         )
                     }
                 }
@@ -64,20 +82,26 @@ object HAStrictMode {
                 .detectAll()
                 .penaltyListener(Executors.newSingleThreadExecutor()) { violation ->
                     val matched = threadPolicyIgnoredViolationRules.filter { it.shouldIgnore(violation) }
-                    if (matched.isEmpty()) {
-                        Timber.e(
-                            violation,
-                            "StrictModeDiag: FATAL thread violation %s on thread %s (no rule matched) — entering FailFast",
-                            violation.javaClass.simpleName,
-                            Thread.currentThread().name,
-                        )
-                        FailFast.failWith(violation)
-                    } else {
-                        Timber.w(
+                    when {
+                        matched.isNotEmpty() -> Timber.w(
                             "StrictModeDiag: ignored thread violation %s on thread %s via rule %s",
                             violation.javaClass.simpleName,
                             Thread.currentThread().name,
                             matched.first()::class.java.simpleName,
+                        )
+                        isAppOwnedViolation(violation) -> {
+                            Timber.e(
+                                violation,
+                                "StrictModeDiag: FATAL thread violation %s on thread %s (no rule matched) — entering FailFast",
+                                violation.javaClass.simpleName,
+                                Thread.currentThread().name,
+                            )
+                            FailFast.failWith(violation)
+                        }
+                        else -> Timber.w(
+                            "StrictModeDiag: ignored thread violation %s on thread %s via safety-net (no app frame, vendor/framework code)",
+                            violation.javaClass.simpleName,
+                            Thread.currentThread().name,
                         )
                     }
                 }
