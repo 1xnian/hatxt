@@ -8,10 +8,11 @@ plugins {
 val homeAssistantAndroidPushUrl = providers.gradleProperty("homeAssistantAndroidPushUrl").get()
 val homeAssistantAndroidRateLimitUrl = providers.gradleProperty("homeAssistantAndroidRateLimitUrl").get()
 
-// Version name used for the BuildConfig VERSION_NAME field. Keep in sync with
-// AndroidApplicationConventionPlugin (app versionName), which no longer appends "-test".
-val versionName = "${project.version}"
-val versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
+// Short, official-style version name shown in the about screen. Must stay in sync with
+// AndroidApplicationConventionPlugin, which builds the APK versionName from the same pieces.
+val baseVersion = project.findProperty("appBaseVersion")?.toString() ?: "2026.7.6"
+val testBuildNumber = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
+val versionName = "$baseVersion-test$testBuildNumber"
 
 android {
     namespace = "io.homeassistant.companion.android.common"
@@ -19,7 +20,7 @@ android {
     defaultConfig {
         buildConfigField("String", "PUSH_URL", "\"$homeAssistantAndroidPushUrl\"")
         buildConfigField("String", "RATE_LIMIT_URL", "\"$homeAssistantAndroidRateLimitUrl\"")
-        buildConfigField("String", "VERSION_NAME", "\"$versionName-$versionCode\"")
+        buildConfigField("String", "VERSION_NAME", "\"$versionName\"")
     }
 
     sourceSets {
