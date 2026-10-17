@@ -73,9 +73,23 @@ class EndpointForegroundRefresher @Inject constructor(
         job = null
     }
 
-    /** One immediate pass, used when the app returns to the foreground. */
+    /**
+     * One immediate, forced pass, used when the app returns to the foreground.
+     *
+     * Unlike the periodic tick this bypasses each server's `isDue` schedule, so a TXT/SRV record
+     * that changed while the app was backgrounded is re-read straight away instead of waiting for the
+     * next interval. For a dynamic address (port that can change at any time) this is what makes
+     * "close the app and reopen it" actually pick up the new port.
+     */
     fun refreshNow() {
-        scope.launch { refreshDueServers(EndpointRefreshSource.FOREGROUND_RESUME) }
+        scope.launch {
+            val servers = runCatching { serverManager.servers() }.getOrElse { return@launch }
+            servers.forEach { server ->
+                runCatching {
+                    serverManager.endpointRepository(server.id).refreshNow()
+                }.onFailure { Timber.w(it, "Forced endpoint refresh of server %d failed", server.id) }
+            }
+        }
     }
 
     private suspend fun observeNetworkRecovery() {

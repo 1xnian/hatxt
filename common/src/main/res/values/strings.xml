@@ -578,6 +578,9 @@
     <string name="rate_limit_title">Notification rate limit</string>
     <string name="refresh_external">Refresh external URL</string>
     <string name="refresh_internal">Refresh internal URL</string>
+    <string name="endpoint_refresh_now">Refresh dynamic address</string>
+    <string name="endpoint_refresh_started">Force-refreshing domain, IP and port…</string>
+    <string name="endpoint_refresh_failed">Dynamic address refresh failed; see the details below</string>
     <string name="refresh_log">Refresh logs</string>
     <string name="refresh">Refresh</string>
     <string name="refresh_interval">Refresh interval</string>

@@ -358,6 +358,23 @@ class EndpointResolver(
         }
 
         val httpsFailure = probe.probe(httpsEndpoint)
+        if (httpsFailure != EndpointProbeFailure.NONE) {
+            // Record the resolved IP for connectivity failures so the user can tell a wrong port
+            // (connection refused) from a fundamentally unreachable address (timeout / no route).
+            val connectivity = httpsFailure in setOf(
+                EndpointProbeFailure.CONNECT_TIMEOUT,
+                EndpointProbeFailure.CONNECTION_REFUSED,
+                EndpointProbeFailure.NO_ROUTE_TO_HOST,
+                EndpointProbeFailure.DNS_FAILURE,
+            )
+            if (connectivity) {
+                rejected += RejectedRecord(
+                    candidate.host,
+                    EndpointRejectionReason.ENDPOINT_UNREACHABLE,
+                    "probe https://${candidate.host}:${candidate.port} resolved to $ip -> $httpsFailure",
+                )
+            }
+        }
         if (httpsFailure == EndpointProbeFailure.NONE) {
             val validated = validate(httpsEndpoint, rejected)
                 ?: return CandidateOutcome.Rejected(EndpointProbeFailure.UNKNOWN_NETWORK_ERROR)

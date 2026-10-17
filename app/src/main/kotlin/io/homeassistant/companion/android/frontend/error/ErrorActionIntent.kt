@@ -15,6 +15,15 @@ sealed interface ErrorActionIntent {
     /** Reload the server connection. */
     data object Refresh : ErrorActionIntent
 
+    /**
+     * Force a fresh dynamic-address lookup (TXT/SRV record) for the server and then reload.
+     *
+     * Used when the server is configured with a dynamic (TXT/SRV) endpoint so the user can re-read
+     * the current port/IP without diving into the settings screen. Differs from [Refresh] in that it
+     * always re-queries the DNS record instead of just reloading the previously resolved URL.
+     */
+    data object RefreshEndpoint : ErrorActionIntent
+
     /** Dismiss the error and keep waiting for the frontend's external-bus handshake. */
     data object Wait : ErrorActionIntent
 

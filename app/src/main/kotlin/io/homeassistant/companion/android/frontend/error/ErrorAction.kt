@@ -22,13 +22,31 @@ data class ErrorAction(@param:StringRes val labelRes: Int, val style: Style, val
  *
  * @param isInternalConnection whether the active connection is the internal one, used to label the
  *   [ErrorActionIntent.Refresh] action.
+ * @param hasDynamicEndpoint whether the server resolves its address from a TXT/SRV record, used to
+ *   offer the [ErrorActionIntent.RefreshEndpoint] action that re-reads that record on demand.
  */
-fun errorActions(error: FrontendConnectionError, isInternalConnection: Boolean): List<ErrorAction> {
+fun errorActions(
+    error: FrontendConnectionError,
+    isInternalConnection: Boolean,
+    hasDynamicEndpoint: Boolean = false,
+): List<ErrorAction> {
     val settings = ErrorAction(
         labelRes = commonR.string.open_settings,
         style = ErrorAction.Style.Secondary,
         intent = ErrorActionIntent.GoToSettings,
     )
+
+    // Only connection-level failures benefit from re-reading the dynamic record; a TLS or
+    // unrecoverable error would not be fixed by a fresh port/IP.
+    val dynamicRefresh: ErrorAction? = if (hasDynamicEndpoint) {
+        ErrorAction(
+            labelRes = commonR.string.endpoint_refresh_now,
+            style = ErrorAction.Style.Primary,
+            intent = ErrorActionIntent.RefreshEndpoint,
+        )
+    } else {
+        null
+    }
 
     return when (error) {
         is FrontendConnectionError.TlsCertNotFound -> listOf(
@@ -64,7 +82,8 @@ fun errorActions(error: FrontendConnectionError, isInternalConnection: Boolean):
         is FrontendConnectionError.Unrecoverable,
         -> listOf(settings.copy(style = ErrorAction.Style.Primary))
 
-        is FrontendConnectionError.ExternalBusTimeout -> listOf(
+        is FrontendConnectionError.ExternalBusTimeout -> listOfNotNull(
+            dynamicRefresh,
             refresh(isInternalConnection),
             settings,
             ErrorAction(
@@ -74,14 +93,19 @@ fun errorActions(error: FrontendConnectionError, isInternalConnection: Boolean):
             ),
         )
 
-        is FrontendConnectionError.Unknown -> listOf(
+        is FrontendConnectionError.Unknown -> listOfNotNull(
+            dynamicRefresh,
             settings.copy(style = ErrorAction.Style.Primary),
             refresh(isInternalConnection, ErrorAction.Style.Secondary),
         )
 
         is FrontendConnectionError.Timeout,
         is FrontendConnectionError.Unreachable,
-        -> listOf(refresh(isInternalConnection), settings)
+        -> listOfNotNull(
+            dynamicRefresh ?: refresh(isInternalConnection),
+            if (dynamicRefresh != null) refresh(isInternalConnection, ErrorAction.Style.Secondary) else null,
+            settings,
+        )
     }
 }
 

@@ -17,6 +17,8 @@ import io.homeassistant.companion.android.common.data.connectivity.ConnectivityC
 import io.homeassistant.companion.android.common.data.keychain.KeyChainRepository
 import io.homeassistant.companion.android.common.data.prefs.PrefsRepository
 import io.homeassistant.companion.android.common.data.prefs.ScreenOrientation
+import io.homeassistant.companion.android.common.data.endpoint.EndpointRefreshOutcome
+import io.homeassistant.companion.android.common.data.endpoint.EndpointUpdate
 import io.homeassistant.companion.android.common.data.servers.ServerManager
 import io.homeassistant.companion.android.common.util.GestureDirection
 import io.homeassistant.companion.android.common.util.SuspendLazy
@@ -598,7 +600,9 @@ internal class FrontendViewModel @VisibleForTesting constructor(
 
             ErrorActionIntent.UpdateWebView -> _events.tryEmit(FrontendEvent.UpdateWebView)
 
-            ErrorActionIntent.Refresh -> onRetry()
+            ErrorActionIntent.Refresh -> forceRefreshEndpointAndRetry()
+
+            ErrorActionIntent.RefreshEndpoint -> forceRefreshEndpointAndRetry()
 
             ErrorActionIntent.Wait -> _viewState.update { state ->
                 if (state is FrontendViewState.Error) {
@@ -1152,7 +1156,8 @@ internal class FrontendViewModel @VisibleForTesting constructor(
         viewModelScope.launch {
             val serverId = _viewState.value.serverId
             val isInternal = resolveIsInternalConnection(serverId)
-            val actions = errorActions(error, isInternalConnection = isInternal)
+            val hasDynamic = hasDynamicEndpoint(serverId)
+            val actions = errorActions(error, isInternalConnection = isInternal, hasDynamicEndpoint = hasDynamic)
             _viewState.update { currentState ->
                 FrontendViewState.Error(
                     serverId = currentState.serverId,
@@ -1164,6 +1169,39 @@ internal class FrontendViewModel @VisibleForTesting constructor(
         }
         // Automatically run connectivity checks when an error occurs
         runConnectivityChecks()
+    }
+
+    /**
+     * Whether the server resolves its address from a TXT/SRV record (the dynamic-address feature).
+     * Used to decide whether the error screen should offer the on-demand "[Refresh dynamic address]"
+     * action and whether a plain "Refresh" should re-query that record first.
+     */
+    private suspend fun hasDynamicEndpoint(serverId: Int): Boolean = runCatching {
+        val settings = serverManager.endpointRepository(serverId).settings()
+        settings.mode.usesDnsRecord && settings.activeRecordName.isNotBlank()
+    }.getOrDefault(false)
+
+    /**
+     * Reloads the connection after force-refreshing the server's dynamic address (TXT/SRV record).
+     *
+     * When the server has a dynamic endpoint this re-reads the current port/IP from DNS (bypassing
+     * the cache when the user enabled that option) and writes the result back to the server URL, then
+     * performs a normal reload. A failure surfaces on the error screen with the latest diagnostics,
+     * and a snackbar confirms the attempt was made.
+     */
+    private fun forceRefreshEndpointAndRetry() {
+        viewModelScope.launch {
+            val serverId = _viewState.value.serverId
+            if (hasDynamicEndpoint(serverId)) {
+                _events.emit(FrontendEvent.ShowSnackbar(commonR.string.endpoint_refresh_started))
+                val outcome = runCatching { serverManager.endpointRepository(serverId).refreshNow() }
+                    .getOrNull()
+                if (outcome is EndpointRefreshOutcome.Applied && outcome.update is EndpointUpdate.Failed) {
+                    _events.emit(FrontendEvent.ShowSnackbar(commonR.string.endpoint_refresh_failed))
+                }
+            }
+            startLoad()
+        }
     }
 
     private suspend fun resolveIsInternalConnection(serverId: Int): Boolean = try {
