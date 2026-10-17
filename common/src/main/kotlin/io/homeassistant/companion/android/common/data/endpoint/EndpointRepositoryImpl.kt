@@ -122,6 +122,8 @@ internal class EndpointRepositoryImpl(
         engine.reload()
     }
 
+    override fun invalidate() = engine.invalidate()
+
     override suspend fun setPlaintextConsent(granted: Boolean) {
         withContext(ioDispatcher) {
             settingsStore.setPlaintextConsent(serverId, granted)

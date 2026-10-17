@@ -161,6 +161,18 @@ class EndpointStateMachine(
         return generation
     }
 
+    /**
+     * Drops the "validated" flag from the current endpoint without forgetting it.
+     *
+     * Used when a connection that was using this address drops: the next pre-connect must re-resolve
+     * (the dynamic TXT/SRV record may now point at a different port/IP) instead of blindly reusing a
+     * dead address. The endpoint stays in the snapshot so the UI can still show what was last used.
+     */
+    @Synchronized
+    fun invalidateCurrent() {
+        state = state.copy(currentIsValidated = false)
+    }
+
     /** True when [token] is still the newest attempt. */
     @Synchronized
     fun isCurrent(token: Long): Boolean = token == generation

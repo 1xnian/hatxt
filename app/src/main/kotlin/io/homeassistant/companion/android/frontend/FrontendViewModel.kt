@@ -377,6 +377,16 @@ internal class FrontendViewModel @VisibleForTesting constructor(
     private var pendingMoreInfoEntityId: String? = null
 
     /**
+     * Wall-clock timestamp (ms) of the last automatic dynamic-endpoint refresh triggered by a
+     * connection failure. Used to throttle the auto-refresh so a persistently unreachable server
+     * (or a reload that itself fails) cannot start a refresh storm that wastes battery and network.
+     */
+    private var lastAutoEndpointRefreshMs = 0L
+
+    /** Minimum gap between two automatic dynamic-endpoint refreshes (see [lastAutoEndpointRefreshMs]). */
+    private val autoEndpointRefreshCooldownMs = 30_000L
+
+    /**
      * The user's "Autoplay video" preference.
      *
      * Lives outside [FrontendViewState] because the WebView is rendered during `Loading`,
@@ -600,7 +610,7 @@ internal class FrontendViewModel @VisibleForTesting constructor(
 
             ErrorActionIntent.UpdateWebView -> _events.tryEmit(FrontendEvent.UpdateWebView)
 
-            ErrorActionIntent.Refresh -> forceRefreshEndpointAndRetry()
+            ErrorActionIntent.Refresh -> onRetry()
 
             ErrorActionIntent.RefreshEndpoint -> forceRefreshEndpointAndRetry()
 
@@ -1157,6 +1167,20 @@ internal class FrontendViewModel @VisibleForTesting constructor(
             val serverId = _viewState.value.serverId
             val isInternal = resolveIsInternalConnection(serverId)
             val hasDynamic = hasDynamicEndpoint(serverId)
+            // When a dynamic (TXT/SRV) server fails to connect, proactively re-read the (possibly
+            // changed) record once before showing the error screen. This is what makes "reopen the
+            // app against a new port/IP" self-heal: the first failure triggers a refresh, and the
+            // reload that follows either succeeds or re-enters this method (where the cooldown below
+            // stops a refresh storm). TLS/cert/auth errors are excluded because a fresh port/IP
+            // cannot fix them.
+            if (hasDynamic && isDynamicRefreshableError(error) &&
+                System.currentTimeMillis() - lastAutoEndpointRefreshMs >= autoEndpointRefreshCooldownMs
+            ) {
+                lastAutoEndpointRefreshMs = System.currentTimeMillis()
+                Timber.d("Auto-refreshing dynamic endpoint after connection failure")
+                forceRefreshEndpointAndRetry()
+                return@launch
+            }
             val actions = errorActions(error, isInternalConnection = isInternal, hasDynamicEndpoint = hasDynamic)
             _viewState.update { currentState ->
                 FrontendViewState.Error(
@@ -1169,6 +1193,20 @@ internal class FrontendViewModel @VisibleForTesting constructor(
         }
         // Automatically run connectivity checks when an error occurs
         runConnectivityChecks()
+    }
+
+    /**
+     * Returns true for the connection-level failures that a fresh TXT/SRV record could plausibly fix:
+     * a timeout, an unreachable host, an unknown network error, or an external-bus handshake timeout.
+     * TLS, certificate, and auth errors are deliberately excluded.
+     */
+    private fun isDynamicRefreshableError(error: FrontendConnectionError): Boolean = when (error) {
+        is FrontendConnectionError.Timeout,
+        is FrontendConnectionError.Unreachable,
+        is FrontendConnectionError.Unknown,
+        is FrontendConnectionError.ExternalBusTimeout,
+        -> true
+        else -> false
     }
 
     /**

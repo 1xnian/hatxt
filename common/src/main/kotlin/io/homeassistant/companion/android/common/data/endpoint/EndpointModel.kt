@@ -271,14 +271,6 @@ enum class EndpointRejectionReason {
 
     /** The configured fixed host is not a usable host name or IP literal. */
     INVALID_FIXED_HOST,
-
-    /**
-     * The candidate address was parsed and resolved, but the connection to it failed (timeout,
-     * refused, no route, …). The accompanying detail names the resolved IP so the failure can be
-     * told apart from a wrong port: a timeout on a public IP from the LAN usually means NAT loopback
-     * is missing, while a refused port means the host is right but nothing listens there.
-     */
-    ENDPOINT_UNREACHABLE,
 }
 
 /** A record that was read from DNS but could not be turned into a usable endpoint. */

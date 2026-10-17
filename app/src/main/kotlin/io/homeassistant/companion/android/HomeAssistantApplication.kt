@@ -472,11 +472,6 @@ open class HomeAssistantApplication : Application() {
                     val visible = startedActivities.incrementAndGet()
                     if (visible != 1) return
                     endpointForegroundRefresher.start()
-                    // Re-check the (possibly changed) dynamic address on every return to the
-                    // foreground. The resolver is single-flight, so a burst of transitions during
-                    // first-launch permission prompts is coalesced into one lookup, and a changed
-                    // TXT/SRV record is picked up immediately instead of waiting for the interval.
-                    endpointForegroundRefresher.refreshNow()
                     if (!backgroundRefreshScheduled) {
                         backgroundRefreshScheduled = true
                         ioScope.launch { scheduleEndpointBackgroundRefresh() }

@@ -45,15 +45,6 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
     @Volatile
     private var initialized = false
 
-    /**
-     * When true, the next [preConnect] ignores the freshness window and performs a real resolution,
-     * so a freshly launched process always re-reads the (possibly changed) port/IP. Cleared as soon
-     * as [preConnect] runs. This is what makes reopening the app re-fetch the dynamic address instead
-     * of trusting a cached one from the previous run.
-     */
-    @Volatile
-    private var forceRefreshOnNextPreConnect = false
-
     val snapshotFlow: StateFlow<EndpointSnapshot> get() = state.asStateFlow()
 
     fun snapshot(): EndpointSnapshot = machine.snapshot()
@@ -79,7 +70,6 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
         mutex.withLock {
             if (initialized) return
             adoptPersistedState()
-            forceRefreshOnNextPreConnect = true
             initialized = true
         }
     }
@@ -89,9 +79,17 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
         mutex.withLock {
             initialized = false
             adoptPersistedState()
-            forceRefreshOnNextPreConnect = true
             initialized = true
         }
+    }
+
+    /**
+     * Marks the current resolved endpoint as no longer trusted, so the next [preConnect] re-resolves
+     * it. Intended to be called when a connection using that address drops, so a changed dynamic
+     * (TXT/SRV) port/IP is picked up on the next reconnect instead of the app retrying a dead one.
+     */
+    fun invalidate() {
+        machine.invalidateCurrent()
     }
 
     /** Runs a resolution attempt requested by the user or by a scheduler. */
@@ -136,9 +134,6 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
      */
     suspend fun preConnect(): ConnectGateResult {
         initialize()
-        // Consume the cold-start flag: a fresh process must re-resolve, never trust a cached address.
-        val forceFresh = forceRefreshOnNextPreConnect
-        forceRefreshOnNextPreConnect = false
         val settings = io { settingsStore.settings(serverId) }
 
         if (settings.mode == EndpointResolutionMode.FIXED) {
@@ -156,11 +151,7 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
 
         val current = machine.snapshot()
         val ageMillis = current.lastResolvedAtMillis?.let { clock() - it }
-        // A dynamic (TXT/SRV) address can change at any time, so the cached one is never trusted for a
-        // fresh connection: every connect re-reads the record. The freshness window below only applies
-        // to static/fixed setups, where the address is not expected to move.
-        val dynamicMode = settings.mode.usesDnsRecord
-        if (!forceFresh && !dynamicMode && current.currentIsValidated && ageMillis != null &&
+        if (current.currentIsValidated && ageMillis != null &&
             ageMillis in 0 until EndpointRefreshPolicy.PRE_CONNECT_FRESHNESS_SECONDS * 1000L
         ) {
             return ConnectGateResult(

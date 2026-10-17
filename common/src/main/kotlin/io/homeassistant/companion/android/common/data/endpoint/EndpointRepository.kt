@@ -120,4 +120,11 @@ interface EndpointRepository {
 
     /** Reloads settings and the persisted last validated endpoint, for example after onboarding. */
     suspend fun reload()
+
+    /**
+     * Marks the current resolved endpoint as stale so the next [ensureFreshBeforeConnect] re-resolves
+     * it. Call this when a connection using that address is lost, so a changed dynamic (TXT/SRV)
+     * port/IP is picked up on reconnect instead of the client retrying a dead address.
+     */
+    fun invalidate()
 }
