@@ -829,8 +829,12 @@ internal class WebSocketCoreImpl(
         // endpoint stale so the next reconnect re-reads the TXT/SRV record and picks up a changed
         // port/IP, instead of retrying the dead one. Resolves "ROS/STUN restart changed the port but
         // the app kept reconnecting to the old one".
-        runCatching { serverManager.endpointRepository(serverId).invalidate() }
-            .onFailure { Timber.w(it, "Failed to invalidate dynamic endpoint on disconnect") }
+        // `endpointRepository` is a suspend factory while this is an OkHttp callback, so the
+        // invalidation has to be launched on the WebSocket scope.
+        wsScope.launch {
+            runCatching { serverManager.endpointRepository(serverId).invalidate() }
+                .onFailure { Timber.w(it, "Failed to invalidate dynamic endpoint on disconnect") }
+        }
         if (authCompleted.isActive) {
             authCompleted.completeExceptionally(t)
         }
