@@ -218,34 +218,41 @@ if [ -n "$LEAKS_HIT" ]; then
 fi
 
 # ------------------------------------------------------------------ language resources in APK
-LANG_DIRS="$(unzip -l "$APK" 2>/dev/null | grep -oE 'res/values-[a-zA-Z][a-zA-Z-]*(/|$)' | sort -u || true)"
-ZH_HIT="$(printf '%s\n' "$LANG_DIRS" | grep -E 'values-zh' || true)"
+# 重要：AAPT2 在编译时会把 res/values-*/strings.xml 等“值资源 XML”编译进 resources.arsc，
+# 并**不会**把原始 XML 文件留在 APK 里。因此用 `unzip -l | grep res/values-zh-rCN/strings.xml`
+# 去查是永远查不到的——那不是“中文缺失”，是方法错误。
+# 权威判定：① resources.arsc 里是否真的含有中文字符（CJK）；② aapt dump configurations 是否
+# 列出 zh 语言配置。满足其一即说明中文已随编译进入 APK。
+ZH_BY_CHARS="no"
+if unzip -p "$APK" resources.arsc 2>/dev/null | grep -aqP '[\x{4e00}-\x{9fff}]'; then
+    ZH_BY_CHARS="yes"
+fi
+ZH_CONF=""
+if [ -n "$AAPT" ]; then
+    ZH_CONF="$($AAPT dump configurations "$APK" 2>/dev/null | grep -iE 'zh' || true)"
+fi
 {
-    echo '## 9. APK 内语言资源目录（汉化验证）'
+    echo '## 9. APK 内语言资源（汉化验证）'
     echo
-    echo '列出 APK 内所有 `res/values-*` 语言限定目录，确证中文翻译是否真的打进了包；'
-    echo '只有出现在归档里的语言资源才会在设备上生效。'
+    echo 'AAPT2 会把 res/values-* 的 XML 编译进 resources.arsc 并从归档中移除，故不能用原始 XML'
+    echo '路径判断。本检查直接验证编译产物：resources.arsc 是否含中文字符，以及是否声明 zh 语言配置。'
     echo
     echo '```text'
-    if [ -n "$LANG_DIRS" ]; then
-        echo "$LANG_DIRS"
+    echo "resources.arsc 含中文字符(CJK): $ZH_BY_CHARS"
+    echo "--- aapt 列出的 zh 语言配置 ---"
+    if [ -n "$ZH_CONF" ]; then
+        echo "$ZH_CONF"
     else
-        echo '（未找到任何 res/values-* 目录）'
-    fi
-    echo '--- 中文资源命中 ---'
-    if [ -n "$ZH_HIT" ]; then
-        echo "$ZH_HIT"
-        ZH_FILES="$(unzip -l "$APK" 2>/dev/null | grep -cE 'res/values-zh-rCN/strings\.xml' || true)"
-        echo "values-zh-rCN/strings.xml 文件数: ${ZH_FILES:-0}"
-    else
-        echo '**未找到任何 values-zh-* 目录，中文资源未进入 APK（汉化缺失根因未修复）。**'
+        echo '（aapt 未列出 zh 配置，或 aapt 不可用；以 CJK 字符判定为准）'
     fi
     echo '```'
     echo
 } >> "$REPORT"
 
-if [ -z "$ZH_HIT" ]; then
-    fail "no Chinese (values-zh-*) resources found inside the APK; translations were not packaged"
+if [ "$ZH_BY_CHARS" = "yes" ] || [ -n "$ZH_CONF" ]; then
+    echo '✅ 中文资源已确认打进 APK（编译产物含 zh 语言内容）。' >> "$REPORT"
+else
+    fail "no Chinese (zh) resources detected in the compiled APK (resources.arsc has no CJK and no zh config)"
 fi
 
 # ------------------------------------------------------------------ endpoint package in DEX
