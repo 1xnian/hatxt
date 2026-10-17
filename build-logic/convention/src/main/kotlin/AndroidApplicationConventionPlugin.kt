@@ -45,11 +45,9 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                     applicationId = APPLICATION_ID
                     targetSdk = libs.versions.androidSdk.target.get().toInt()
 
-                    // Test build marker: every APK gets a "-test" suffix on the version name so it is
-                    // distinguishable in the launcher app-info, the in-app about screen and the APK
-                    // versionName — regardless of the base version produced elsewhere (e.g. a CI
-                    // generated timestamped version that overrides the root project version).
-                    versionName = "${project.version}-test"
+                    // Release-style version name: use the base project version as-is. The minimal
+                    // flavor still appends its "-minimal" suffix; no "-test" marker is added.
+                    versionName = "${project.version}"
                     versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
 
                     val noStrictMode = project.findProperty("noStrictMode")?.toString()?.ifEmpty { "true" }

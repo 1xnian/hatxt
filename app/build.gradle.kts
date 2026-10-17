@@ -31,6 +31,13 @@ android {
                     useLegacyPackaging = true
                 }
             }
+            // Only ship the arm64-v8a native libraries. The bundled Cronet and microwakeword
+            // native libs are ~19 MB per ABI; packing all four ABIs bloats the debug APK to
+            // ~73 MB while only arm64 devices (e.g. the phone this build targets) are ever used.
+            // This cuts the APK to ~20 MB without changing release behaviour.
+            ndk {
+                abiFilters += listOf("arm64-v8a")
+            }
         }
 
         // Arm64-only debug variant for on-device testing on arm64 phones (e.g. Redmi K70 Ultra).

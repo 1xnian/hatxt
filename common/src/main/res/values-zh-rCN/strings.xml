@@ -46,7 +46,7 @@
     <string name="allow">允许</string>
     <string name="always_show_first_view_on_app_start">打开应用时始终显示第一个视图</string>
     <string name="always_show_first_view_on_app_start_summary">打开应用后立即显示默认仪表盘的第一个视图</string>
-    <string name="app_name">Home Assistant 测试版</string>
+    <string name="app_name">Home Assistant</string>
     <string name="play_services_unavailable_full_flavor">Google Play services are unavailable. This version of the app may crash. Use the minimal version instead.</string>
     <string name="app_version_info">应用版本信息</string>
     <string name="application_version">应用版本</string>
