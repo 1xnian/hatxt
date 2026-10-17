@@ -10,7 +10,10 @@ import io.homeassistant.companion.android.common.data.servers.ServerManager
 import io.homeassistant.companion.android.di.qualifiers.NamedEndpointStorage
 import javax.inject.Inject
 import javax.inject.Provider
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 /**
@@ -100,20 +103,27 @@ internal class EndpointRepositoryImpl(
     private val serverId: Int,
     private val engine: EndpointResolutionEngine,
     private val settingsStore: EndpointSettingsStore,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : EndpointRepository {
 
     override val snapshot: Flow<EndpointSnapshot> get() = engine.snapshotFlow
 
-    override suspend fun settings(): EndpointSettings = settingsStore.settings(serverId)
+    override suspend fun settings(): EndpointSettings = withContext(ioDispatcher) {
+        settingsStore.settings(serverId)
+    }
 
     override suspend fun updateSettings(settings: EndpointSettings) {
-        settingsStore.saveSettings(serverId, settings)
+        withContext(ioDispatcher) {
+            settingsStore.saveSettings(serverId, settings)
+        }
         // Re-arm the schedule immediately so a changed interval takes effect without a restart.
         engine.reload()
     }
 
     override suspend fun setPlaintextConsent(granted: Boolean) {
-        settingsStore.setPlaintextConsent(serverId, granted)
+        withContext(ioDispatcher) {
+            settingsStore.setPlaintextConsent(serverId, granted)
+        }
     }
 
     override suspend fun refreshNow(): EndpointRefreshOutcome =

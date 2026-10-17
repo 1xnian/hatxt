@@ -49,6 +49,21 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
 
     fun snapshot(): EndpointSnapshot = machine.snapshot()
 
+    /**
+     * Runs [block] on [ioDispatcher] regardless of the caller's dispatcher.
+     *
+     * Every `settingsStore`/`synchronizer` access performs disk or database I/O (SharedPreferences
+     * reads/writes, Room writes to the server table). The engine is invoked from many places — the
+     * periodic foreground refresher, the `WorkManager` worker, the authentication token refresh and
+     * the WebSocket connect/reconnect path — and some of those call sites run on the main thread
+     * (e.g. a reconnect launched from a `viewModelScope`/lifecycle coroutine). Because the debug
+     * build enables a process-wide StrictMode **thread** policy with `FailFast` on the main thread, a
+     * disk read on the main thread kills the process. Routing all of the engine's I/O through
+     * [ioDispatcher] here makes the whole endpoint module StrictMode-clean no matter who calls it.
+     */
+    private suspend inline fun <T> io(crossinline block: () -> T): T =
+        withContext(ioDispatcher) { block() }
+
     /** Loads settings and the persisted last validated endpoint. Runs once per process. */
     suspend fun initialize() {
         if (initialized) return
@@ -71,7 +86,7 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
     /** Runs a resolution attempt requested by the user or by a scheduler. */
     suspend fun runResolution(source: EndpointRefreshSource): EndpointRefreshOutcome {
         initialize()
-        val settings = settingsStore.settings(serverId)
+        val settings = io { settingsStore.settings(serverId) }
         if (!settings.mode.usesDnsRecord || settings.activeRecordName.isBlank()) {
             return EndpointRefreshOutcome.SkippedNotConfigured
         }
@@ -110,12 +125,12 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
      */
     suspend fun preConnect(): ConnectGateResult {
         initialize()
-        val settings = settingsStore.settings(serverId)
+        val settings = io { settingsStore.settings(serverId) }
 
         if (settings.mode == EndpointResolutionMode.FIXED) {
             return ConnectGateResult(
                 decision = ConnectDecision.PROCEED,
-                url = synchronizer.currentExternalUrl(serverId),
+                url = io { synchronizer.currentExternalUrl(serverId) },
             )
         }
         if (settings.activeRecordName.isBlank()) {
@@ -170,13 +185,13 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
     }
 
     private suspend fun adoptPersistedState() {
-        val settings = settingsStore.settings(serverId)
-        val currentUrl = synchronizer.currentExternalUrl(serverId)
+        val settings = io { settingsStore.settings(serverId) }
+        val currentUrl = io { synchronizer.currentExternalUrl(serverId) }
         machine.configure(settings, currentUrl)
 
         // Only an endpoint that a previous run actually validated is allowed to become the
         // "last known good" address. A URL read back from the database is not.
-        settingsStore.lastValidated(serverId)?.let { persisted ->
+        io { settingsStore.lastValidated(serverId) }?.let { persisted ->
             if (persisted.endpoint.url == currentUrl) {
                 machine.restoreValidated(persisted.endpoint, persisted.resolvedAtMillis)
             }
@@ -191,7 +206,7 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
         val token = machine.beginResolving()
         publish()
 
-        val consent = settingsStore.hasPlaintextConsent(serverId)
+        val consent = io { settingsStore.hasPlaintextConsent(serverId) }
         val result = withContext(ioDispatcher) {
             resolver.resolve(settings, plaintextConsent = consent)
         }
@@ -206,7 +221,7 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
 
         val update = machine.applyResult(token, result, settings)
         result.endpoint?.let { validated ->
-            settingsStore.saveLastValidated(serverId, PersistedValidatedEndpoint(validated, clock()))
+            io { settingsStore.saveLastValidated(serverId, PersistedValidatedEndpoint(validated, clock())) }
         }
         publish()
         applyAddressChange(update)
@@ -223,7 +238,7 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
     private suspend fun applyAddressChange(update: EndpointUpdate) {
         when (update) {
             is EndpointUpdate.Resolved -> {
-                synchronizer.applyExternalUrl(serverId, update.endpoint)
+                io { synchronizer.applyExternalUrl(serverId, update.endpoint) }
                 eventRecorder.record(
                     EndpointLifecycleEvent.ADDRESS_CHANGED,
                     "no address was in use -> ${update.endpoint.url}",
@@ -232,7 +247,7 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
             }
 
             is EndpointUpdate.Changed -> {
-                synchronizer.applyExternalUrl(serverId, update.endpoint)
+                io { synchronizer.applyExternalUrl(serverId, update.endpoint) }
                 eventRecorder.record(
                     EndpointLifecycleEvent.ADDRESS_CHANGED,
                     "${update.previousUrl} -> ${update.endpoint.url}",
@@ -259,7 +274,7 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
         val currentSnapshot = machine.snapshot()
         val lastValidated = currentSnapshot.lastSuccessful?.let {
             EndpointConnectGate.ValidatedAddress(it.url, currentSnapshot.lastResolvedAtMillis)
-        } ?: settingsStore.lastValidated(serverId)?.let {
+        } ?: io { settingsStore.lastValidated(serverId) }?.let {
             EndpointConnectGate.ValidatedAddress(it.endpoint.url, it.resolvedAtMillis)
         }
 

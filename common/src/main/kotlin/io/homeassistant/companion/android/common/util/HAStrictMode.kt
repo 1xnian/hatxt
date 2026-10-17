@@ -41,6 +41,7 @@ object HAStrictMode {
                     val matched = vmPolicyIgnoredViolationRules.filter { it.shouldIgnore(violation) }
                     if (matched.isEmpty()) {
                         Timber.e(
+                            violation,
                             "StrictModeDiag: FATAL VM violation %s on thread %s (no rule matched) — entering FailFast",
                             violation.javaClass.simpleName,
                             Thread.currentThread().name,
@@ -65,6 +66,7 @@ object HAStrictMode {
                     val matched = threadPolicyIgnoredViolationRules.filter { it.shouldIgnore(violation) }
                     if (matched.isEmpty()) {
                         Timber.e(
+                            violation,
                             "StrictModeDiag: FATAL thread violation %s on thread %s (no rule matched) — entering FailFast",
                             violation.javaClass.simpleName,
                             Thread.currentThread().name,
