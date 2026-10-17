@@ -61,7 +61,7 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
      * disk read on the main thread kills the process. Routing all of the engine's I/O through
      * [ioDispatcher] here makes the whole endpoint module StrictMode-clean no matter who calls it.
      */
-    private suspend inline fun <T> io(block: suspend () -> T): T =
+    private suspend fun <T> io(block: suspend () -> T): T =
         withContext(ioDispatcher) { block() }
 
     /** Loads settings and the persisted last validated endpoint. Runs once per process. */
