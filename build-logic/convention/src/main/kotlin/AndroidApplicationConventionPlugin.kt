@@ -67,10 +67,15 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
 
                 signingConfigs {
                     create("release") {
-                        storeFile = file(System.getenv("KEYSTORE_PATH") ?: "release_keystore.keystore")
-                        storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-                        keyAlias = System.getenv("KEYSTORE_ALIAS") ?: ""
-                        keyPassword = System.getenv("KEYSTORE_ALIAS_PASSWORD") ?: ""
+                        // A fixed test keystore is committed at app/keystore/ha-test.keystore and used
+                        // by default (password "android", alias "hatest"). This makes every build —
+                        // local and CI alike — share one signature, so testers can update over the
+                        // existing install instead of uninstalling first. CI / a release engineer can
+                        // still override every field via the KEYSTORE_* environment variables.
+                        storeFile = file(System.getenv("KEYSTORE_PATH") ?: "keystore/ha-test.keystore")
+                        storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "android"
+                        keyAlias = System.getenv("KEYSTORE_ALIAS") ?: "hatest"
+                        keyPassword = System.getenv("KEYSTORE_ALIAS_PASSWORD") ?: "android"
                         enableV1Signing = true
                         enableV2Signing = true
                     }

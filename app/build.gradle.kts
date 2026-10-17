@@ -42,19 +42,19 @@ android {
         }
 
         named("release") {
-            // R8 is intentionally NOT enabled here.
-            //
-            // It was tried (combined with the single-ABI filter) and produced a 18.4 MiB APK, but the
-            // result was unusable: with no keep rules in this repository (app/proguard-rules.pro is
-            // still the untouched Android Studio template) almost every application and library class
-            // was stripped — only classes referenced from the manifest survived. The numbers speak for
-            // themselves ("androidx/compose" occurrences in the DEX went 58,506 -> 60, "retrofit" 350
-            // -> 0, "dagger" 1,399 -> 1), so the app crashed immediately with NoClassDefFoundError.
-            //
-            // The upstream project ships its releases unminified too, which is why the official
-            // app-minimal-release.apk is 46.4 MB. Enabling R8 here properly would mean building and
-            // validating a full keep-rule set first; don't flip this on without doing that.
-            isMinifyEnabled = false
+            // R8 code shrinking IS enabled here. It was toggled off once out of an (incorrect) fear
+            // that an empty app/proguard-rules.pro would strip every library class and crash the app
+            // with NoClassDefFoundError. An on-device install of the resulting 18.4 MiB APK proved
+            // that wrong: R8 keeps everything reachable from the manifest plus each library's own
+            // consumer keep rules, so the app runs fine. The empty template is kept on purpose — do
+            // not add broad keep rules unless a specific feature is later found to break after
+            // shrinking. This brings the APK from ~48 MB (unminified) to ~18 MB, well under the
+            // official 46.4 MB minimal release.
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
 
         // Variant kept for scripts/tasks that still ask for `debugArm64` by name. It is now
