@@ -42,7 +42,13 @@ class EndpointForegroundRefresher @Inject constructor(
     private val connectivity: EndpointConnectivity,
 ) {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // The loop reads SharedPreferences (`settingsStore.settings()`), consults the Room-backed
+    // server list and performs DNS/HTTPS lookups. `Dispatchers.Default` is the CPU-bound pool and
+    // doing I/O there is both a scheduling mistake and a StrictMode hazard: the debug build installs
+    // a thread policy with `detectAll()`, and every thread of the process — not just the main one —
+    // is subject to it. A disk read on a Default worker is reported back to the app and, with the
+    // FailFast handler installed, kills the process.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null
 
     /** Starts the loop. Redundant calls are ignored. */

@@ -458,13 +458,43 @@ open class HomeAssistantApplication : Application() {
     private fun registerEndpointRefreshLifecycle() {
         registerActivityLifecycleCallbacks(
             object : Application.ActivityLifecycleCallbacks {
+                /**
+                 * Whether an immediate refresh has already been requested since the process started.
+                 *
+                 * `onActivityStarted` also fires when the user comes back from a *system* activity
+                 * the app itself launched — most notably the permission dialog
+                 * (`com.lbe.security.miui/com.android.packageinstaller.permission.ui.GrantPermissionsActivity`).
+                 * A first launch asks for several permissions in a row, so the naive "refresh on
+                 * every foreground transition" produced a burst of lookups exactly while the
+                 * permission UI was on screen. The periodic loop below still keeps the address fresh
+                 * afterwards, so the extra refreshes bought nothing but work on a hot path.
+                 */
+                private var refreshedOnFirstStart = false
+
+                /**
+                 * Whether the periodic `WorkManager` job has already been reconciled once.
+                 *
+                 * [scheduleEndpointBackgroundRefresh] reads the server list and the endpoint
+                 * settings (SharedPreferences) and then enqueues or cancels a periodic worker.
+                 * Reconfiguring it on every foreground transition was pointless: the settings can
+                 * only change from the settings screens, and those already re-schedule explicitly.
+                 */
+                private var backgroundRefreshScheduled = false
+
                 override fun onActivityStarted(activity: Activity) {
                     val visible = startedActivities.incrementAndGet()
                     if (visible != 1) return
                     endpointForegroundRefresher.start()
-                    // Coming back to the foreground is a good moment to re-check the address.
-                    endpointForegroundRefresher.refreshNow()
-                    ioScope.launch { scheduleEndpointBackgroundRefresh() }
+                    if (!refreshedOnFirstStart) {
+                        refreshedOnFirstStart = true
+                        // Coming back to the foreground for the first time is a good moment to
+                        // re-check the address.
+                        endpointForegroundRefresher.refreshNow()
+                    }
+                    if (!backgroundRefreshScheduled) {
+                        backgroundRefreshScheduled = true
+                        ioScope.launch { scheduleEndpointBackgroundRefresh() }
+                    }
                 }
 
                 override fun onActivityStopped(activity: Activity) {
