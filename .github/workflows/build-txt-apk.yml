@@ -17,6 +17,11 @@ name: Build HA Android dynamic address APK
 
 on:
   workflow_dispatch:
+    inputs:
+      disable_strict_mode:
+        description: 'Build with StrictMode FailFast disabled (passes -PnoStrictMode)'
+        type: boolean
+        default: false
   push:
     branches: [main, master]
   pull_request:
@@ -141,7 +146,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ./gradlew :app:assembleMinimalDebug --stacktrace
+          ./gradlew :app:assembleMinimalDebug ${{ inputs.disable_strict_mode == true && '-PnoStrictMode' || '' }} --stacktrace
 
       - name: Static APK inspection
         if: always()
