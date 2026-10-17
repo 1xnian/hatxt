@@ -153,12 +153,12 @@ fi
 
 if [ -n "$AAPT" ]; then
     "$AAPT" dump badging "$APK" 2>&1 | grep -E \
-        "^package:|^application-label|^application:|^launchable-activity:|^uses-sdk:|^sdkVersion:|^targetSdkVersion:|^native-code:" \
+        "^package:|^application-label|^application:|versionName|versionCode|^launchable-activity:|^uses-sdk:|^sdkVersion:|^targetSdkVersion:|^native-code:" \
         >> "$REPORT" || true
 elif [ -n "$AAPT2" ]; then
     "$AAPT2" dump badging "$APK" 2>&1 | head -40 >> "$REPORT" || true
 elif [ -n "$APKANALYZER" ]; then
-    "$APKANALYZER" manifest print "$APK" 2>&1 | grep -E 'package=|android:label|<activity|<activity-alias|MAIN|LAUNCHER' >> "$REPORT" || true
+    "$APKANALYZER" manifest print "$APK" 2>&1 | grep -E 'package=|android:label|android:versionName|<activity|<activity-alias|MAIN|LAUNCHER' >> "$REPORT" || true
 else
     echo '未找到 aapt / aapt2 / apkanalyzer，无法读取 badging。' >> "$REPORT"
 fi
@@ -217,9 +217,40 @@ if [ -n "$LEAKS_HIT" ]; then
     fail "the merged manifest still declares a LeakCanary entry: $LEAKS_HIT"
 fi
 
+# ------------------------------------------------------------------ language resources in APK
+LANG_DIRS="$(unzip -l "$APK" 2>/dev/null | grep -oE 'res/values-[a-zA-Z][a-zA-Z-]*(/|$)' | sort -u || true)"
+ZH_HIT="$(printf '%s\n' "$LANG_DIRS" | grep -E 'values-zh' || true)"
+{
+    echo '## 9. APK 内语言资源目录（汉化验证）'
+    echo
+    echo '列出 APK 内所有 `res/values-*` 语言限定目录，确证中文翻译是否真的打进了包；'
+    echo '只有出现在归档里的语言资源才会在设备上生效。'
+    echo
+    echo '```text'
+    if [ -n "$LANG_DIRS" ]; then
+        echo "$LANG_DIRS"
+    else
+        echo '（未找到任何 res/values-* 目录）'
+    fi
+    echo '--- 中文资源命中 ---'
+    if [ -n "$ZH_HIT" ]; then
+        echo "$ZH_HIT"
+        ZH_FILES="$(unzip -l "$APK" 2>/dev/null | grep -cE 'res/values-zh-rCN/strings\.xml' || true)"
+        echo "values-zh-rCN/strings.xml 文件数: ${ZH_FILES:-0}"
+    else
+        echo '**未找到任何 values-zh-* 目录，中文资源未进入 APK（汉化缺失根因未修复）。**'
+    fi
+    echo '```'
+    echo
+} >> "$REPORT"
+
+if [ -z "$ZH_HIT" ]; then
+    fail "no Chinese (values-zh-*) resources found inside the APK; translations were not packaged"
+fi
+
 # ------------------------------------------------------------------ endpoint package in DEX
 {
-    echo '## 9. 动态地址解析模块是否真的打进了 APK'
+    echo '## 10. 动态地址解析模块是否真的打进了 APK'
     echo
     echo 'DEX 中的类型描述符形如 `Lio/homeassistant/companion/android/common/data/endpoint/<Name>;`。'
     echo
@@ -250,7 +281,7 @@ fi
 
 # ------------------------------------------------------------------ launcher entry count
 {
-    echo '## 10. 入口数量核对'
+    echo '## 11. 入口数量核对'
     echo
     echo '预期源码清单中恰好 3 个 `android.intent.action.MAIN` 入口：LAUNCHER、LEANBACK_LAUNCHER，以及默认禁用的 HOME 别名。'
     echo
@@ -269,7 +300,7 @@ fi
 
 # ------------------------------------------------------------------ unit test results
 {
-    echo '## 11. 单元测试结果'
+    echo '## 12. 单元测试结果'
     echo
     echo '```text'
 } >> "$REPORT"
@@ -303,7 +334,7 @@ fi
 {
     echo '```'
     echo
-    echo '## 12. 结论'
+    echo '## 13. 结论'
     echo
 } >> "$REPORT"
 

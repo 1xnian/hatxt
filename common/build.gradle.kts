@@ -8,7 +8,8 @@ plugins {
 val homeAssistantAndroidPushUrl = providers.gradleProperty("homeAssistantAndroidPushUrl").get()
 val homeAssistantAndroidRateLimitUrl = providers.gradleProperty("homeAssistantAndroidRateLimitUrl").get()
 
-val versionName = project.version.toString()
+// Test build marker: keep in sync with AndroidApplicationConventionPlugin (app versionName).
+val versionName = "${project.version}-test"
 val versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
 
 android {
