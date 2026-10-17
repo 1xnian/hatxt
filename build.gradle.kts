@@ -20,6 +20,10 @@ plugins {
     alias(libs.plugins.screenshot).apply(false)
 }
 
+// Test build marker: every build gets a distinguishable version name (shown in the
+// launcher app-info, in-app about screen and as the APK versionName).
+version = "2026.7.6-test"
+
 allprojects {
     // :automotive has no Kotlin sources of its own; it reuses :app's, which are already analyzed
     // there. Don't apply detekt to it at all: even disabled detekt tasks would still compile the

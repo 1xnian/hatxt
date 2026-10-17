@@ -34,6 +34,10 @@ jobs:
     name: Build, test and inspect Minimal Debug APK
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      # Monotonic, per-run version code so each test APK is uniquely identifiable
+      # (shown as the "(code)" part of the version in the about screen / app-info).
+      VERSION_CODE: ${{ github.run_number }}
 
     steps:
       - name: Checkout source

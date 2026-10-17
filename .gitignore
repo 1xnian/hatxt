@@ -352,6 +352,10 @@ common/src/main/res/*/strings.xml
 app/src/main/res/xml/locales_config.xml
 wear/src/main/res/xml/locales_config.xml
 !common/src/main/res/values/strings.xml
+# Fork maintains its own Chinese translation; keep it version-controlled so the CI
+# build (which does not download Crowdin translations) actually ships with Chinese.
+# Without this exception the APK is built with no common-module Chinese strings at all.
+!common/src/main/res/values-zh-rCN/strings.xml
 
 ## Avoid to push secrets from CI or localy
 playStorePublishServiceCredentialsFile.json
