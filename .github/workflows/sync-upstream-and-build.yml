@@ -1,0 +1,277 @@
+name: Sync upstream and build APK
+
+# Keeps this fork up to date with the official Home Assistant Android repository and publishes a
+# ready-to-install APK, without anyone having to run Gradle locally.
+#
+# How the two branches relate:
+#   * `upstream-main` is a pristine mirror of `home-assistant/android`. Nothing custom is ever
+#     committed to it, so it can always be fast-forwarded to the official tip.
+#   * `main` is the fork: upstream history plus this repository's own functionality (TXT/SRV
+#     dynamic addresses, zh-CN resources, StrictMode vendor exemptions, minimal UI trim, ...).
+#
+# The sync job merges `upstream-main` into `main` automatically. A clean merge is pushed straight
+# away. A conflicting merge is aborted, `main` is left untouched, and the workflow stops with a
+# message pointing at the conflicting paths, so the fork never ends up in a half-merged state
+# that nobody notices.
+#
+# Builds are attached to a rolling `latest-build` release so the download URL stays stable:
+#   https://github.com/<owner>/<repo>/releases/download/latest-build/app-minimal-debugArm64.apk
+
+on:
+  schedule:
+    # Every day at 03:17 UTC (11:17 Asia/Shanghai); the offset avoids the top-of-hour rush.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      skip_sync:
+        description: "Only build the current main, do not pull upstream first"
+        type: boolean
+        default: false
+      build_universal:
+        description: "Also build the universal APK (all ABIs, ~79 MB)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream-build
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: home-assistant/android
+  UPSTREAM_BRANCH: main
+  FORK_BRANCH: main
+
+jobs:
+  sync:
+    name: Merge upstream into the fork
+    if: github.event_name == 'schedule' || inputs.skip_sync == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+      upstream_sha: ${{ steps.merge.outputs.upstream_sha }}
+
+    steps:
+      - name: Check out the fork with full history
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.FORK_BRANCH }}
+          fetch-depth: 0
+          # Needed to push the merge commit back. Provided by the default workflow token.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --no-tags upstream "${UPSTREAM_BRANCH}"
+          git branch -f upstream-tracking FETCH_HEAD
+          echo "upstream tip: $(git rev-parse --short FETCH_HEAD)"
+
+      - name: Merge upstream into the fork
+        id: merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          UPSTREAM_SHA="$(git rev-parse FETCH_HEAD)"
+
+          if git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD; then
+            echo "The fork already contains the upstream tip; nothing to merge."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # -X theirs is deliberately NOT used: a silent, wrong resolution of an upstream refactor
+          # is worse than a failed job. Conflicts abort the merge and surface in the run summary.
+          if ! git merge --no-ff --no-edit "$UPSTREAM_SHA" \
+                 -m "chore(sync): merge ${UPSTREAM_REPO}@${UPSTREAM_SHA:0:7} into ${FORK_BRANCH}"; then
+            echo "::error::Merge conflict while syncing ${UPSTREAM_REPO}. The fork was left untouched."
+            {
+              echo "## Upstream sync conflict"
+              echo
+              echo "Merging \`${UPSTREAM_REPO}@${UPSTREAM_SHA:0:7}\` into \`${FORK_BRANCH}\` conflicted."
+              echo "\`${FORK_BRANCH}\` was **not** modified. Resolve locally:"
+              echo
+              echo '```bash'
+              echo "git fetch origin ${FORK_BRANCH}"
+              echo "git checkout ${FORK_BRANCH}"
+              echo "git remote add upstream https://github.com/${UPSTREAM_REPO}.git 2>/dev/null || true"
+              echo "git fetch upstream ${UPSTREAM_BRANCH}"
+              echo "git merge upstream/${UPSTREAM_BRANCH}   # resolve, then push"
+              echo '```'
+              echo
+              echo "Conflicting paths:"
+              echo '```'
+              git --no-pager diff --name-only --diff-filter=U || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            git merge --abort || true
+            exit 1
+          fi
+
+          git push origin "HEAD:${FORK_BRANCH}"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Upstream synced"
+            echo
+            echo "Merged \`${UPSTREAM_REPO}@${UPSTREAM_SHA:0:7}\` into \`${FORK_BRANCH}\`."
+            echo
+            echo '```'
+            git --no-pager log --oneline -5
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Build Minimal APK
+    needs: sync
+    # Runs even when the sync job was skipped (`workflow_dispatch` with skip_sync), and also when
+    # the sync found nothing new — the APK is then rebuilt from the current fork head.
+    if: always() && (needs.sync.result == 'success' || needs.sync.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out the fork head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.FORK_BRANCH }}
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-provider: basic
+
+      - name: Restore the Gradle wrapper executable bit
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -x gradlew ] || chmod +x gradlew
+          ./gradlew --version
+
+      - name: Install the Android SDK packages required by compileSdk 37
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools" \
+              -maxdepth 3 -type f -name sdkmanager | head -n1)"
+          fi
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
+
+      - name: Provide mocked Google Services configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for module in app wear automotive; do
+            cp .github/mock-google-services.json "${module}/google-services.json"
+          done
+
+      # The customisations live in Kotlin and in resources, so the unit tests are the cheapest
+      # guard against an upstream merge silently breaking them. Failures are reported but do not
+      # cost the APK: a test run that is red for a pre-existing reason should not block installable
+      # artifacts, while the report stays attached to the run.
+      - name: Run unit tests (informational)
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :app:testMinimalDebugUnitTest :common:testDebugUnitTest --stacktrace
+
+      - name: Build arm64 Minimal debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :app:assembleMinimalDebugArm64 --stacktrace
+
+      - name: Build universal Minimal debug APK
+        if: inputs.build_universal == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :app:assembleMinimalDebug --stacktrace
+
+      - name: Collect artifacts and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find app/build/outputs/apk/minimal -name '*.apk' -print -exec cp {} dist/ \;
+          cd dist
+          sha256sum ./*.apk | tee SHA256SUMS.txt
+          for apk in ./*.apk; do
+            echo "### ${apk}" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "bytes: $(stat -c%s "$apk")" >> "$GITHUB_STEP_SUMMARY"
+            echo "sha256: $(sha256sum "$apk" | cut -d' ' -f1)" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Upload APKs as workflow artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ha-minimal-apk-${{ github.run_number }}
+          path: dist/*.apk
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports-${{ github.run_number }}
+          path: |
+            common/build/reports/tests/**
+            app/build/reports/tests/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      # A rolling release keeps one stable download URL for the phone, instead of a new URL on
+      # every run. `--clobber` replaces the assets in place.
+      - name: Publish to the rolling release
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG=latest-build
+          TITLE="Latest automated build"
+          NOTES="Built from \`${GITHUB_SHA:0:7}\` on $(date -u +'%Y-%m-%d %H:%M UTC')."
+
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TITLE" --notes "$NOTES"
+          else
+            gh release create "$TAG" --title "$TITLE" --notes "$NOTES" --prerelease
+          fi
+
+          gh release upload "$TAG" dist/*.apk dist/SHA256SUMS.txt --clobber
+
+          {
+            echo "## Published"
+            echo
+            echo "Download: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          } >> "$GITHUB_STEP_SUMMARY"
