@@ -50,11 +50,14 @@ class EndpointResolver(
     private val eventRecorder: EndpointEventRecorder = EndpointEventRecorder.NoOp,
     private val clock: () -> Long = System::currentTimeMillis,
     /**
-     * Chain to use when a resolution asks to bypass the device resolver, see
+     * Builds the chain to use when a resolution asks to bypass the device resolver, see
      * [EndpointSettings.bypassSystemDnsCache]. `null` falls back to [dnsClient], which keeps the
      * resolver usable (and testable) without a second chain.
+     *
+     * It takes the settings because the right chain depends on how far the user wants to get from a
+     * cache: a different public resolver, or the authoritative servers of the zone itself.
      */
-    private val cacheBypassDnsClient: DnsClient? = null,
+    private val bypassClientFactory: ((EndpointSettings) -> DnsClient)? = null,
 ) {
 
     /** Resolves a fixed, user provided URL. No DNS record is queried in this mode. */
@@ -89,7 +92,7 @@ class EndpointResolver(
         bypassSystemDnsCache: Boolean = false,
     ): EndpointResolutionResult {
         val started = clock()
-        val dns = if (bypassSystemDnsCache) cacheBypassDnsClient ?: dnsClient else dnsClient
+        val dns = if (bypassSystemDnsCache) bypassClientFactory?.invoke(settings) ?: dnsClient else dnsClient
         if (!settings.mode.usesDnsRecord) {
             return EndpointResolutionResult.failure(
                 EndpointResolutionError(

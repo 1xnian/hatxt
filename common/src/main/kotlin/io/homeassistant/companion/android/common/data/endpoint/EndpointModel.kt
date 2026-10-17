@@ -60,6 +60,8 @@ enum class EndpointScheme(val urlScheme: String) {
 /** DNS record types the endpoint resolver needs. The numeric codes match the wire format. */
 enum class DnsRecordType(val code: Int) {
     A(1),
+    /** Authoritative nameservers of a zone. Needed to ask the zone's own servers directly. */
+    NS(2),
     CNAME(5),
     TXT(16),
     AAAA(28),
@@ -416,7 +418,35 @@ data class EndpointSettings(
      * pre-connect gate must not add a round trip to every login.
      */
     val bypassSystemDnsCache: Boolean = false,
+
+    /**
+     * Ask the **authoritative nameservers of the zone** instead of a recursive resolver.
+     *
+     * This is the strongest form of bypassing the cache and the only one that is independent of the
+     * record's TTL: recursive resolvers (the device's, and the public ones) all answer from a cache,
+     * and a record hosted at one provider is only guaranteed current at *that* provider's own
+     * servers until every other cache expires. The authoritative servers hold the published value
+     * immediately.
+     */
+    val queryAuthoritativeDns: Boolean = false,
+
+    /**
+     * Explicit DNS servers to ask on a manual refresh, comma or space separated, for example
+     * `119.29.29.29` or `119.29.29.29, 223.5.5.5`.
+     *
+     * Worth setting when the record is hosted at a known provider: asking that provider's own
+     * resolver avoids waiting for a *different* provider's cache to expire. Unlike
+     * [queryAuthoritativeDns] this still reads a cache, it just reads the one closest to the source.
+     */
+    val customDnsServers: String = "",
 ) {
+    /** [customDnsServers] split into individual server addresses, blanks and separators removed. */
+    val customDnsServerList: List<String>
+        get() = customDnsServers
+            .split(',', ' ', ';', '\n', '\t')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
     /** Name of the record that is actually queried for the current [mode]. */
     val activeRecordName: String
         get() = when (mode) {

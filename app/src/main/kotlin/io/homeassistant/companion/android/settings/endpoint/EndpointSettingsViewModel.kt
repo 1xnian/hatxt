@@ -168,6 +168,18 @@ class EndpointSettingsViewModel @Inject constructor(
     fun setBypassSystemDnsCache(enabled: Boolean) =
         updateSettings { it.copy(bypassSystemDnsCache = enabled) }
 
+    /**
+     * Asks the authoritative nameservers of the zone instead of a recursive resolver.
+     *
+     * The authoritative servers hold the value that was published, so this sees a change immediately
+     * instead of waiting for every cache between the device and the zone to expire.
+     */
+    fun setQueryAuthoritativeDns(enabled: Boolean) =
+        updateSettings { it.copy(queryAuthoritativeDns = enabled) }
+
+    /** Servers to ask on a manual refresh, typically the ones hosting the record. */
+    fun setCustomDnsServers(value: String) = updateSettings { it.copy(customDnsServers = value) }
+
     /** Applies one of [EndpointRefreshPolicy.PRESET_INTERVALS_SECONDS]. Clears a custom value. */
     fun setPresetInterval(seconds: Long) {
         _state.update { it.copy(customIntervalInput = "", intervalError = false) }

@@ -54,6 +54,8 @@ fun EndpointSettingsView(
     onUseFixedHostChange: (Boolean) -> Unit,
     onFixedHostChange: (String) -> Unit,
     onBypassSystemDnsChange: (Boolean) -> Unit,
+    onQueryAuthoritativeDnsChange: (Boolean) -> Unit,
+    onCustomDnsServersChange: (String) -> Unit,
     onPresetIntervalChange: (Long) -> Unit,
     onCustomIntervalChange: (String) -> Unit,
     onPeriodicRefreshChange: (Boolean) -> Unit,
@@ -209,6 +211,33 @@ fun EndpointSettingsView(
                     style = MaterialTheme.typography.caption,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
+                if (settings.bypassSystemDnsCache) {
+                    SwitchRow(
+                        text = stringResource(commonR.string.endpoint_authoritative_dns),
+                        checked = settings.queryAuthoritativeDns,
+                        onCheckedChange = onQueryAuthoritativeDnsChange,
+                    )
+                    Text(
+                        text = stringResource(commonR.string.endpoint_authoritative_dns_summary),
+                        style = MaterialTheme.typography.caption,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    if (!settings.queryAuthoritativeDns) {
+                        OutlinedTextField(
+                            value = settings.customDnsServers,
+                            onValueChange = onCustomDnsServersChange,
+                            label = { Text(stringResource(commonR.string.endpoint_custom_dns_title)) },
+                            placeholder = { Text(stringResource(commonR.string.endpoint_custom_dns_hint)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            text = stringResource(commonR.string.endpoint_custom_dns_summary),
+                            style = MaterialTheme.typography.caption,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                }
 
                 SectionTitle(commonR.string.endpoint_refresh_title)
                 Text(

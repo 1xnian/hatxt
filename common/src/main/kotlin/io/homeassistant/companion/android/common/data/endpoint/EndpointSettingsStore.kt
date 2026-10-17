@@ -79,6 +79,10 @@ internal class LocalStorageEndpointSettingsStore(
                 ?: defaults.fixedHost,
             bypassSystemDnsCache = localStorage.getBooleanOrNull(key(serverId, KEY_BYPASS_SYSTEM_DNS))
                 ?: defaults.bypassSystemDnsCache,
+            queryAuthoritativeDns = localStorage.getBooleanOrNull(key(serverId, KEY_AUTHORITATIVE_DNS))
+                ?: defaults.queryAuthoritativeDns,
+            customDnsServers = localStorage.getString(key(serverId, KEY_CUSTOM_DNS_SERVERS))?.trim()
+                ?: defaults.customDnsServers,
         )
     }
 
@@ -100,6 +104,8 @@ internal class LocalStorageEndpointSettingsStore(
         localStorage.putBoolean(key(serverId, KEY_FIXED_HOST_ENABLED), sanitized.useFixedHost)
         localStorage.putString(key(serverId, KEY_FIXED_HOST), sanitized.fixedHost.trim())
         localStorage.putBoolean(key(serverId, KEY_BYPASS_SYSTEM_DNS), sanitized.bypassSystemDnsCache)
+        localStorage.putBoolean(key(serverId, KEY_AUTHORITATIVE_DNS), sanitized.queryAuthoritativeDns)
+        localStorage.putString(key(serverId, KEY_CUSTOM_DNS_SERVERS), sanitized.customDnsServers.trim())
     }
 
     override suspend fun hasPlaintextConsent(serverId: Int): Boolean =
@@ -139,6 +145,8 @@ internal class LocalStorageEndpointSettingsStore(
         const val KEY_FIXED_HOST_ENABLED = "fixed_host_enabled"
         const val KEY_FIXED_HOST = "fixed_host"
         const val KEY_BYPASS_SYSTEM_DNS = "bypass_system_dns"
+        const val KEY_AUTHORITATIVE_DNS = "authoritative_dns"
+        const val KEY_CUSTOM_DNS_SERVERS = "custom_dns_servers"
         const val KEY_PLAINTEXT_CONSENT = "plaintext_consent"
         const val KEY_LAST_VALIDATED_URL = "last_validated_url"
         const val KEY_LAST_VALIDATED_AT = "last_validated_at"
@@ -156,6 +164,8 @@ internal class LocalStorageEndpointSettingsStore(
             KEY_FIXED_HOST_ENABLED,
             KEY_FIXED_HOST,
             KEY_BYPASS_SYSTEM_DNS,
+            KEY_AUTHORITATIVE_DNS,
+            KEY_CUSTOM_DNS_SERVERS,
             KEY_PLAINTEXT_CONSENT,
             KEY_LAST_VALIDATED_URL,
             KEY_LAST_VALIDATED_AT,

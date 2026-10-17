@@ -57,6 +57,8 @@ class EndpointSettingsFragment : Fragment() {
                         onUseFixedHostChange = viewModel::setUseFixedHost,
                         onFixedHostChange = viewModel::setFixedHost,
                         onBypassSystemDnsChange = viewModel::setBypassSystemDnsCache,
+                        onQueryAuthoritativeDnsChange = viewModel::setQueryAuthoritativeDns,
+                        onCustomDnsServersChange = viewModel::setCustomDnsServers,
                         onPresetIntervalChange = viewModel::setPresetInterval,
                         onCustomIntervalChange = viewModel::setCustomInterval,
                         onPeriodicRefreshChange = viewModel::setPeriodicRefreshEnabled,

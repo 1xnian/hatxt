@@ -198,6 +198,12 @@ object DnsMessageCodec {
                     ?.takeIf { it.isNotEmpty() }
                     ?.let { canonicalNames += it }
 
+                // Same wire format as CNAME: one compressed domain name.
+                DnsRecordType.NS -> readName(message, dataOffset)
+                    ?.value
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let { answers += DnsAnswer(type, it, name.value, ttl) }
+
                 null -> Unit // Unknown types are skipped, they cannot influence a URL.
             }
         }

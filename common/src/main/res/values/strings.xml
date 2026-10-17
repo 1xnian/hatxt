@@ -1566,6 +1566,11 @@
     <string name="endpoint_ttl_seconds">%1$d s (cached answers may still be served for this long)</string>
     <string name="endpoint_bypass_system_dns">Refresh past the local DNS cache</string>
     <string name="endpoint_bypass_system_dns_summary">When you refresh manually, ask a public resolver before the device one. The device resolver keeps answering from its cache until the record expires, so without this a record that just changed still looks unchanged. Recommended when your port changes often and the record has a long TTL.</string>
+    <string name="endpoint_authoritative_dns">Ask the authoritative nameservers</string>
+    <string name="endpoint_authoritative_dns_summary">Ask the nameservers that actually host the record instead of any cache. Only this ignores the record TTL, so a change is seen the moment it is published. Use this when even a public resolver still shows the old value.</string>
+    <string name="endpoint_custom_dns_title">DNS servers to query</string>
+    <string name="endpoint_custom_dns_hint">119.29.29.29, 223.5.5.5</string>
+    <string name="endpoint_custom_dns_summary">Comma or space separated. Asking the provider that hosts the record avoids waiting for a different provider cache to expire. Still reads a cache, just the closest one.</string>
     <string name="endpoint_refresh_title">Refresh interval</string>
     <string name="endpoint_refresh_description">How often the app re-reads the DNS record while it is running. Android limits how often background work may run, so a background refresh can be delayed. The check before every login is never skipped, and a refresh that is not due yet never replaces a validated address.</string>
     <string name="endpoint_refresh_periodic_disabled">Periodic refresh is off. The record is still checked before every login.</string>
