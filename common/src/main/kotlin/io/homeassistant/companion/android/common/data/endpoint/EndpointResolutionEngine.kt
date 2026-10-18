@@ -273,8 +273,24 @@ internal class EndpointResolutionEngine @Suppress("LongParameterList") construct
                 eventRecorder.record(EndpointLifecycleEvent.CONFIGURATION_UPDATED, update.endpoint.url)
             }
 
-            is EndpointUpdate.Unchanged ->
-                eventRecorder.record(EndpointLifecycleEvent.ADDRESS_UNCHANGED, update.snapshot.current?.url)
+            is EndpointUpdate.Unchanged -> {
+                // "Unchanged" only means the freshly resolved address equals the one the engine saw
+                // last time. The server configuration itself can still have drifted (user edited the
+                // URL by hand, another writer touched it). Re-check and repair it, so a manual
+                // refresh always ends with the configuration matching the DNS record.
+                val configuredUrl = io { synchronizer.currentExternalUrl(serverId) }
+                val endpointUrl = update.snapshot.current?.url
+                if (endpointUrl != null && configuredUrl != endpointUrl) {
+                    io { synchronizer.applyExternalUrl(serverId, update.snapshot.current!!) }
+                    eventRecorder.record(
+                        EndpointLifecycleEvent.ADDRESS_CHANGED,
+                        "$configuredUrl -> $endpointUrl (configuration had drifted from the record)",
+                    )
+                    eventRecorder.record(EndpointLifecycleEvent.CONFIGURATION_UPDATED, endpointUrl)
+                } else {
+                    eventRecorder.record(EndpointLifecycleEvent.ADDRESS_UNCHANGED, endpointUrl)
+                }
+            }
 
             // Nothing is written on failure: the previous address stays in the configuration.
             is EndpointUpdate.Failed -> Unit
