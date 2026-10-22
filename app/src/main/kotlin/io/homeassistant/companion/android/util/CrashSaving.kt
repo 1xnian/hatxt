@@ -21,18 +21,30 @@ fun initCrashSaving(context: Context) {
     Thread.setDefaultUncaughtExceptionHandler { thread, exception ->
         // Try saving the crash in a file
         try {
+            val crashText =
+                """|Timestamp: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(Date())}
+                    |Thread: ${thread.name}
+                    |Exception: ${exception.stackTraceToString()}
+                """.trimMargin()
+
             val crashFile = File(context.applicationContext.cacheDir.absolutePath + FATAL_CRASH_FILE)
             if (!crashFile.exists()) {
                 crashFile.parentFile?.mkdirs()
                 crashFile.createNewFile()
             }
+            crashFile.writeText(crashText)
 
-            crashFile.writeText(
-                """|Timestamp: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(Date())}
-                    |Thread: ${thread.name}
-                    |Exception: ${exception.stackTraceToString()}
-                """.trimMargin(),
-            )
+            // Second copy in app-specific external storage (Android/data/<pkg>/files/…):
+            // reachable via USB file transfer / most file managers even when the app
+            // itself cannot start, so the crash can be retrieved without adb.
+            runCatching {
+                context.getExternalFilesDir(null)?.let { extDir ->
+                    File(extDir, "fatalcrash/last_crash").apply {
+                        parentFile?.mkdirs()
+                        writeText(crashText)
+                    }
+                }
+            }
         } catch (e: Exception) {
             Timber.i(e, "Tried saving fatal crash but encountered exception")
         }

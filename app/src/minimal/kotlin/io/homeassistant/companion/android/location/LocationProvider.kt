@@ -14,6 +14,7 @@ import io.homeassistant.companion.android.common.util.instant
 import io.homeassistant.companion.android.sensors.GeocodeSensorManager.Companion.LOCATION_OUTDATED_THRESHOLD
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
+import kotlinx.coroutines.CancellationException
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import timber.log.Timber
@@ -26,7 +27,19 @@ private val provider: String = if (SdkVersion.isAtLeast(Build.VERSION_CODES.S)) 
 
 @OptIn(ExperimentalTime::class)
 @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION])
-suspend fun getLastLocation(context: Context): Location? {
+suspend fun getLastLocation(context: Context): Location? = try {
+    getLastLocationInternal(context)
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Exception) {
+    // System location disabled can make getLastKnownLocation/getCurrentLocation throw
+    // (SecurityException, IllegalArgumentException for missing providers, OEM quirks).
+    // Never let a location failure crash the caller; just report no location.
+    Timber.w(e, "getLastLocation failed (location may be disabled)")
+    null
+}
+
+private suspend fun getLastLocationInternal(context: Context): Location? {
     val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
 
     if (locationManager == null) {

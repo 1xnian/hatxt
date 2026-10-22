@@ -6,6 +6,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import io.homeassistant.companion.android.common.util.SdkVersion
 import javax.inject.Inject
+import timber.log.Timber
 
 @Suppress("DEPRECATION")
 class WifiHelperImpl @Inject constructor(
@@ -39,7 +40,19 @@ class WifiHelperImpl @Inject constructor(
     }
 
     override fun getWifiSsid(): String? {
-        val rawSsid = wifiManager?.connectionInfo?.ssid ?: return null // Deprecated but callbacks aren't instant
+        // Deprecated but callbacks aren't instant.
+        // Reading the SSID is location-gated: when system location is off (or the location
+        // permission is missing) several OEM ROMs throw SecurityException /
+        // IllegalStateException here instead of returning UNKNOWN_SSID. This is called from
+        // the URL selection path (isInternal) during startup, so an uncaught throw would take
+        // the whole app down on launch. Treat any failure as "SSID unknown".
+        val rawSsid = try {
+            wifiManager?.connectionInfo?.ssid
+        } catch (e: Exception) {
+            Timber.w(e, "Unable to read Wi-Fi SSID (location disabled or permission missing)")
+            null
+        } ?: return null
+
         return rawSsid
             .takeUnless {
                 SdkVersion.isAtLeast(Build.VERSION_CODES.R) && it == WifiManager.UNKNOWN_SSID
@@ -48,5 +61,12 @@ class WifiHelperImpl @Inject constructor(
     }
 
     override fun getWifiBssid(): String? =
-        wifiManager?.connectionInfo?.bssid // Deprecated but callback doesn't provide BSSID info instantly
+        // Deprecated but callback doesn't provide BSSID info instantly. Same location gating
+        // applies as for the SSID above.
+        try {
+            wifiManager?.connectionInfo?.bssid
+        } catch (e: Exception) {
+            Timber.w(e, "Unable to read Wi-Fi BSSID (location disabled or permission missing)")
+            null
+        }
 }

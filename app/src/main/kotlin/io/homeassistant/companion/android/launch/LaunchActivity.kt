@@ -57,6 +57,7 @@ import timber.log.Timber
 import io.homeassistant.companion.android.util.enableEdgeToEdgeCompat
 import io.homeassistant.companion.android.websocket.WebsocketManager
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.parcelize.Parcelize
 
@@ -253,13 +254,33 @@ class LaunchActivity : AppCompatActivity() {
             android.os.Process.myPid(),
             isFinishing,
         )
-        SensorWorker.start(this)
+        // Startup helpers must never take the app down, regardless of system state
+        // (e.g. system location toggled off) or OEM quirks. Log and continue instead.
+        runCatching { SensorWorker.start(this) }
+            .onFailure { Timber.e(it, "PermissionDiag: SensorWorker.start failed") }
         lifecycleScope.launch {
-            WebsocketManager.start(this@LaunchActivity)
+            runSafely("WebsocketManager.start") { WebsocketManager.start(this@LaunchActivity) }
             Timber.d("PermissionDiag: running launch checks (location disabled / local network)")
-            checkLocationDisabled()
-            checkLocalNetworkPermission()
+            // checkLocationDisabled() only does real work when system location is OFF
+            // (sensor scan + location-disabled notification), so failures here show up
+            // exclusively with location disabled.
+            runSafely("checkLocationDisabled") { checkLocationDisabled() }
+            runSafely("checkLocalNetworkPermission") { checkLocalNetworkPermission() }
             Timber.i("PermissionDiag: launch checks done")
+        }
+    }
+
+    /**
+     * Runs [block], logging (instead of crashing the app) when it throws. Coroutine
+     * cancellation is rethrown so lifecycle-driven cancellation keeps working.
+     */
+    private suspend fun runSafely(label: String, block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Timber.e(e, "PermissionDiag: %s failed", label)
         }
     }
 
