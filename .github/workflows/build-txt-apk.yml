@@ -43,6 +43,9 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          # Full history + tags: the changelog step diffs the previous release tag against HEAD.
+          fetch-depth: 0
 
       - name: Compute build timestamp (Beijing time)
         id: ts
@@ -224,6 +227,23 @@ jobs:
           VER="$(python3 -c "import json;d=json.load(open('$APK_META'));print(d['elements'][0]['versionName'])")"
           echo "version=$VER" >> "$GITHUB_OUTPUT"
 
+          # Changelog: commit subjects since the previous release tag (newest first).
+          # Falls back to the last 15 commits when no tag exists yet.
+          prev="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          if [ -n "$prev" ]; then
+            log="$(git log --no-merges --pretty=format:'- %s (%h)' "$prev..HEAD" | head -n 30)"
+          else
+            log="$(git log --no-merges --pretty=format:'- %s (%h)' -n 15)"
+          fi
+          if [ -z "$log" ]; then
+            log="- 无新增代码提交（仅构建流程/文档变更）"
+          fi
+          {
+            echo "changelog<<CHANGELOG_EOF"
+            echo "$log"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Publish to GitHub Releases
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
@@ -238,7 +258,10 @@ jobs:
             **版本**：${{ steps.notes.outputs.version }}
             **构建来源**：commit `${{ github.sha }}` — [查看 CI 运行](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
-            ### 本版特性
+            ### 本次更新
+            ${{ steps.notes.outputs.changelog }}
+
+            ### 固定特性
             - R8 代码压缩已开启，APK 体积约 18 MB
             - 仅包含 arm64-v8a 架构（适配主流手机）
             - 使用固定测试签名，**可直接覆盖安装**，无需先卸载
